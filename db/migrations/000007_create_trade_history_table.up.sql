@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS trades_history (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_trades_symbol ON trades(symbol);
-CREATE INDEX idx_trades_executed_at ON trades(executed_at);
-CREATE INDEX idx_trades_trade_type ON trades(trade_type);
-CREATE INDEX idx_trades_strategy_tag ON trades(strategy_tag);
+CREATE INDEX idx_trades_history_symbol ON trades_history(symbol);
+CREATE INDEX idx_trades_history_executed_at ON trades_history(executed_at);
+CREATE INDEX idx_trades_history_trade_type ON trades_history(trade_type);
+CREATE INDEX idx_trades_history_strategy_tag ON trades_history(strategy_tag);
