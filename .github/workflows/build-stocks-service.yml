@@ -36,7 +36,7 @@ jobs:
             -trimpath \
             -ldflags="-s -w" \
             -o dist/stocks-service \
-            ./cmd
+            ./cmd/server
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
