@@ -53,5 +53,5 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/stocks-service:latest
-            ghcr.io/${{ github.repository_owner }}/stocks-service:${{ github.sha }}
+            ghcr.io/<your-github-username>/stocks-service:latest
+            ghcr.io/<your-github-username>/stocks-service:${{ github.sha }}
