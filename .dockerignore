@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+
+# Documentation
+*.md
+LICENSE
+
+# Environment files
+.env
+.env.*
+
+# Test files
+*_test.go
+
+# Build artifacts
+/bin/
+/dist/
+
+# OS files
+.DS_Store
