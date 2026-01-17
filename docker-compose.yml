@@ -14,7 +14,7 @@ services:
       - SERVER_PORT=8081
       - SERVER_HOST=0.0.0.0
       # Database - connects to external trading-db container
-      - DB_HOST=trading-db
+      - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=trader
       - DB_PASSWORD=trader5
