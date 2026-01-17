@@ -1,0 +1,46 @@
+name: Build stocks-service (Raspberry Pi)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build ARM64 Binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.0'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build Linux ARM64 binary
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          go build \
+            -trimpath \
+            -ldflags="-s -w" \
+            -o dist/stocks-service \
+            ./cmd/stocks-service
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stocks-service-linux-arm64
+          path: dist/stocks-service
+          retention-days: 14
