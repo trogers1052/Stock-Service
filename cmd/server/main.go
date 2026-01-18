@@ -23,6 +23,8 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
+	log.Println("Go Bears!!!!")
+
 	// Connect to database
 	db, err := database.New(cfg.Database.ConnectionString())
 	if err != nil {
