@@ -303,7 +303,9 @@ func (c *Consumer) closePosition(sellTrade *models.RawTrade, position *models.Po
 		rawTrades = []*models.RawTrade{}
 	}
 
-	// Calculate aggregated values
+	// Calculate aggregated values from all raw trades linked to this position
+	// Note: The sell trade that triggered this close was already linked to the position
+	// in handleSell before closePosition was called, so it's included in rawTrades
 	var totalBuyQty, totalBuyCost, totalSellQty, totalSellRevenue, totalFees decimal.Decimal
 
 	for _, rt := range rawTrades {
@@ -316,11 +318,6 @@ func (c *Consumer) closePosition(sellTrade *models.RawTrade, position *models.Po
 			totalSellRevenue = totalSellRevenue.Add(rt.TotalCost)
 		}
 	}
-
-	// Include the current sell trade
-	totalFees = totalFees.Add(sellTrade.Fees)
-	totalSellQty = totalSellQty.Add(sellTrade.Quantity)
-	totalSellRevenue = totalSellRevenue.Add(sellTrade.TotalCost)
 
 	// Calculate realized P&L
 	realizedPnl := totalSellRevenue.Sub(totalBuyCost).Sub(totalFees)
