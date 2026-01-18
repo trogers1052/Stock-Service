@@ -52,6 +52,25 @@ func main() {
 	defer producer.Close()
 	log.Printf("Kafka producer initialized (brokers: %v)", cfg.Kafka.Brokers)
 
+	// Create context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create and start Kafka consumer for trade events
+	consumer := kafka.NewConsumer(
+		cfg.Kafka.Brokers,
+		cfg.Kafka.TradesTopic,
+		cfg.Kafka.ConsumerGroup,
+		db,
+	)
+	go func() {
+		log.Printf("Starting Kafka consumer for topic: %s (group: %s)",
+			cfg.Kafka.TradesTopic, cfg.Kafka.ConsumerGroup)
+		if err := consumer.Start(ctx); err != nil {
+			log.Printf("Kafka consumer error: %v", err)
+		}
+	}()
+
 	// Set up HTTP handler and routes
 	handler := api.NewHandler(db, producer, redisClient)
 	router := api.SetupRoutes(handler)
@@ -81,12 +100,20 @@ func main() {
 
 	log.Println("Shutting down server...")
 
-	// Graceful shutdown with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	// Cancel context to stop Kafka consumer
+	cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	// Graceful shutdown with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	// Close Kafka consumer
+	if err := consumer.Close(); err != nil {
+		log.Printf("Error closing Kafka consumer: %v", err)
 	}
 
 	log.Println("Server stopped")

@@ -31,8 +31,10 @@ type DatabaseConfig struct {
 
 // KafkaConfig holds Kafka/Redpanda configuration
 type KafkaConfig struct {
-	Brokers []string
-	Topic   string
+	Brokers       []string
+	Topic         string
+	TradesTopic   string
+	ConsumerGroup string
 }
 
 // RedisConfig holds Redis configuration
@@ -59,8 +61,10 @@ func Load() *Config {
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
 		Kafka: KafkaConfig{
-			Brokers: parseBrokers(getEnv("KAFKA_BROKERS", "localhost:19092")),
-			Topic:   getEnv("KAFKA_TOPIC", "stock-events"),
+			Brokers:       parseBrokers(getEnv("KAFKA_BROKERS", "localhost:19092")),
+			Topic:         getEnv("KAFKA_TOPIC", "stock-events"),
+			TradesTopic:   getEnv("KAFKA_TRADES_TOPIC", "trading.orders"),
+			ConsumerGroup: getEnv("KAFKA_CONSUMER_GROUP", "stock-service"),
 		},
 		Redis: RedisConfig{
 			Host:     getEnv("REDIS_HOST", "localhost"),
