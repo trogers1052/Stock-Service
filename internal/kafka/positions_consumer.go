@@ -17,9 +17,16 @@ type PositionsRepository interface {
 	ReplaceAllPositions(positions []*models.Position) error
 }
 
+// positionsReader is a small interface wrapper around kafka.Reader to enable unit testing.
+type positionsReader interface {
+	ReadMessage(ctx context.Context) (kafka.Message, error)
+	Close() error
+	Config() kafka.ReaderConfig
+}
+
 // PositionsConsumer handles consuming position snapshot events from Kafka
 type PositionsConsumer struct {
-	reader *kafka.Reader
+	reader positionsReader
 	repo   PositionsRepository
 }
 

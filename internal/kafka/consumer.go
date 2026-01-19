@@ -13,33 +13,23 @@ import (
 	"github.com/trogers1052/stock-alert-system/internal/models"
 )
 
-// Repository defines the interface for database operations
-type Repository interface {
-	// Raw trades
+// RawTradeRepository defines the interface for raw trade database operations
+type RawTradeRepository interface {
 	CreateRawTrade(t *models.RawTrade) error
 	RawTradeExistsByOrderID(orderID, source string) (bool, error)
-	UpdateRawTradePositionID(tradeID int, positionID int) error
-	GetRawTradesByPositionID(positionID int) ([]*models.RawTrade, error)
-	LinkRawTradesToTradeHistory(positionID, historyID int) error
-
-	// Positions
-	GetPositionBySymbol(symbol string) (*models.Position, error)
-	CreatePosition(p *models.Position) error
-	UpdatePosition(p *models.Position) error
-	DeletePosition(id int) error
-
-	// Trade history
-	CreateTradeHistory(t *models.TradeHistory) error
 }
 
 // Consumer handles consuming trade events from Kafka
+// Note: This consumer only stores raw trades for audit purposes.
+// Positions are managed separately via the PositionsConsumer which
+// receives position snapshots directly from Robinhood.
 type Consumer struct {
 	reader *kafka.Reader
-	repo   Repository
+	repo   RawTradeRepository
 }
 
 // NewConsumer creates a new Kafka consumer for trade events
-func NewConsumer(brokers []string, topic, groupID string, repo Repository) *Consumer {
+func NewConsumer(brokers []string, topic, groupID string, repo RawTradeRepository) *Consumer {
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:        brokers,
 		Topic:          topic,
@@ -116,19 +106,13 @@ func (c *Consumer) processMessage(msg kafka.Message) error {
 		return fmt.Errorf("failed to convert event to raw trade: %w", err)
 	}
 
-	// Save raw trade to database
+	// Save raw trade to database (audit trail only - positions come from Robinhood snapshots)
 	if err := c.repo.CreateRawTrade(rawTrade); err != nil {
 		return fmt.Errorf("failed to save raw trade: %w", err)
 	}
 
 	log.Printf("Saved raw trade: %s %s %s @ %s (order_id: %s)",
 		rawTrade.Side, rawTrade.Quantity, rawTrade.Symbol, rawTrade.Price, rawTrade.OrderID)
-
-	// Aggregate into positions
-	if err := c.aggregateToPosition(rawTrade); err != nil {
-		log.Printf("Warning: failed to aggregate to position: %v", err)
-		// Don't fail the whole message processing - raw trade is saved
-	}
 
 	return nil
 }
@@ -194,193 +178,6 @@ func (c *Consumer) convertEventToRawTrade(event models.TradeEvent) (*models.RawT
 		Fees:       fees,
 		ExecutedAt: executedAt,
 	}, nil
-}
-
-// aggregateToPosition updates or creates a position based on the raw trade
-func (c *Consumer) aggregateToPosition(trade *models.RawTrade) error {
-	// Get existing position for this symbol
-	position, err := c.repo.GetPositionBySymbol(trade.Symbol)
-
-	if err != nil && !strings.Contains(err.Error(), "not found") {
-		return fmt.Errorf("failed to get position: %w", err)
-	}
-
-	if trade.Side == models.TradeTypeBuy {
-		return c.handleBuy(trade, position)
-	} else {
-		return c.handleSell(trade, position)
-	}
-}
-
-// handleBuy processes a BUY trade - creates or updates position
-func (c *Consumer) handleBuy(trade *models.RawTrade, position *models.Position) error {
-	if position == nil {
-		// Create new position
-		newPosition := &models.Position{
-			Symbol:     trade.Symbol,
-			Quantity:   trade.Quantity,
-			EntryPrice: trade.Price,
-			EntryDate:  trade.ExecutedAt,
-		}
-
-		if err := c.repo.CreatePosition(newPosition); err != nil {
-			return fmt.Errorf("failed to create position: %w", err)
-		}
-
-		// Link raw trade to position
-		if err := c.repo.UpdateRawTradePositionID(trade.ID, newPosition.ID); err != nil {
-			log.Printf("Warning: failed to link raw trade to position: %v", err)
-		}
-
-		log.Printf("Created new position: %s %s @ %s",
-			newPosition.Symbol, newPosition.Quantity, newPosition.EntryPrice)
-	} else {
-		// Update existing position with weighted average price
-		// New avg = (old_qty * old_price + new_qty * new_price) / (old_qty + new_qty)
-		oldTotal := position.Quantity.Mul(position.EntryPrice)
-		newTotal := trade.Quantity.Mul(trade.Price)
-		totalQty := position.Quantity.Add(trade.Quantity)
-
-		position.EntryPrice = oldTotal.Add(newTotal).Div(totalQty)
-		position.Quantity = totalQty
-
-		if err := c.repo.UpdatePosition(position); err != nil {
-			return fmt.Errorf("failed to update position: %w", err)
-		}
-
-		// Link raw trade to position
-		if err := c.repo.UpdateRawTradePositionID(trade.ID, position.ID); err != nil {
-			log.Printf("Warning: failed to link raw trade to position: %v", err)
-		}
-
-		log.Printf("Updated position: %s now %s @ avg %s",
-			position.Symbol, position.Quantity, position.EntryPrice)
-	}
-
-	return nil
-}
-
-// handleSell processes a SELL trade - updates or closes position
-func (c *Consumer) handleSell(trade *models.RawTrade, position *models.Position) error {
-	if position == nil {
-		// Selling without a position - this could be a short or data issue
-		log.Printf("Warning: SELL for %s but no position exists", trade.Symbol)
-		return nil
-	}
-
-	// Link raw trade to position
-	if err := c.repo.UpdateRawTradePositionID(trade.ID, position.ID); err != nil {
-		log.Printf("Warning: failed to link raw trade to position: %v", err)
-	}
-
-	// Calculate remaining quantity
-	remainingQty := position.Quantity.Sub(trade.Quantity)
-
-	if remainingQty.LessThanOrEqual(decimal.Zero) {
-		// Position fully closed - move to trade history
-		return c.closePosition(trade, position)
-	}
-
-	// Partial sell - update position quantity
-	position.Quantity = remainingQty
-
-	if err := c.repo.UpdatePosition(position); err != nil {
-		return fmt.Errorf("failed to update position: %w", err)
-	}
-
-	log.Printf("Partial sell: %s remaining %s @ avg %s",
-		position.Symbol, position.Quantity, position.EntryPrice)
-
-	return nil
-}
-
-// closePosition moves a fully closed position to trade history
-func (c *Consumer) closePosition(sellTrade *models.RawTrade, position *models.Position) error {
-	// Get all raw trades for this position to calculate totals
-	rawTrades, err := c.repo.GetRawTradesByPositionID(position.ID)
-	if err != nil {
-		log.Printf("Warning: could not get raw trades for position: %v", err)
-		rawTrades = []*models.RawTrade{}
-	}
-
-	// Calculate aggregated values from all raw trades linked to this position
-	// Note: The sell trade that triggered this close was already linked to the position
-	// in handleSell before closePosition was called, so it's included in rawTrades
-	var totalBuyQty, totalBuyCost, totalSellQty, totalSellRevenue, totalFees decimal.Decimal
-
-	for _, rt := range rawTrades {
-		totalFees = totalFees.Add(rt.Fees)
-		if rt.Side == models.TradeTypeBuy {
-			totalBuyQty = totalBuyQty.Add(rt.Quantity)
-			totalBuyCost = totalBuyCost.Add(rt.TotalCost)
-		} else {
-			totalSellQty = totalSellQty.Add(rt.Quantity)
-			totalSellRevenue = totalSellRevenue.Add(rt.TotalCost)
-		}
-	}
-
-	// Calculate realized P&L
-	realizedPnl := totalSellRevenue.Sub(totalBuyCost).Sub(totalFees)
-	var realizedPnlPct decimal.Decimal
-	if !totalBuyCost.IsZero() {
-		realizedPnlPct = realizedPnl.Div(totalBuyCost).Mul(decimal.NewFromInt(100))
-	}
-
-	// Calculate holding period
-	holdingHours := int(sellTrade.ExecutedAt.Sub(position.EntryDate).Hours())
-
-	// Calculate average prices
-	avgEntryPrice := position.EntryPrice
-	var avgExitPrice decimal.Decimal
-	if !totalSellQty.IsZero() {
-		avgExitPrice = totalSellRevenue.Div(totalSellQty)
-	}
-
-	// Create trade history entry
-	entryDate := position.EntryDate
-	exitDate := sellTrade.ExecutedAt
-	tradeHistory := &models.TradeHistory{
-		Symbol:             position.Symbol,
-		TradeType:          models.TradeTypeSell, // Closed position
-		Quantity:           totalBuyQty,
-		Price:              avgEntryPrice,
-		TotalCost:          totalBuyCost,
-		Fee:                totalFees,
-		EntryDate:          &entryDate,
-		ExitDate:           &exitDate,
-		HoldingPeriodHours: &holdingHours,
-		RealizedPnl:        realizedPnl,
-		RealizedPnlPct:     realizedPnlPct,
-		EntryReason:        position.EntryReason,
-		ExecutedAt:         sellTrade.ExecutedAt,
-	}
-
-	// Set additional fields from position if available
-	if !position.EntryRSI.IsZero() {
-		tradeHistory.EntryRSI = position.EntryRSI
-	}
-
-	if err := c.repo.CreateTradeHistory(tradeHistory); err != nil {
-		return fmt.Errorf("failed to create trade history: %w", err)
-	}
-
-	// Link all raw trades to this trade history
-	if err := c.repo.LinkRawTradesToTradeHistory(position.ID, tradeHistory.ID); err != nil {
-		log.Printf("Warning: failed to link raw trades to trade history: %v", err)
-	}
-
-	// Delete the position
-	if err := c.repo.DeletePosition(position.ID); err != nil {
-		log.Printf("Warning: failed to delete closed position: %v", err)
-	}
-
-	log.Printf("Closed position: %s | Entry: %s @ %s | Exit: %s @ %s | P&L: %s (%.2f%%)",
-		position.Symbol,
-		totalBuyQty, avgEntryPrice,
-		totalSellQty, avgExitPrice,
-		realizedPnl, realizedPnlPct.InexactFloat64())
-
-	return nil
 }
 
 // Close closes the Kafka consumer
