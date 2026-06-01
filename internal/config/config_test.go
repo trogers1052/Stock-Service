@@ -147,7 +147,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "postgres", cfg.Database.Host)
 	assert.Equal(t, "5432", cfg.Database.Port)
 	assert.Equal(t, "trader", cfg.Database.User)
-	assert.Equal(t, "REDACTED_PASSWORD", cfg.Database.Password)
+	assert.Equal(t, "", cfg.Database.Password)
 	assert.Equal(t, "trading_platform", cfg.Database.DBName)
 	assert.Equal(t, "disable", cfg.Database.SSLMode)
 
