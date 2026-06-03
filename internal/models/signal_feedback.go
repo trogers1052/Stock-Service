@@ -4,18 +4,18 @@ import "time"
 
 // SignalFeedback represents a user's feedback on a trading signal.
 type SignalFeedback struct {
-	ID                 int       `json:"id"`
-	Symbol             string    `json:"symbol"`
-	Signal             string    `json:"signal"`
-	Action             string    `json:"action"`
-	Confidence         float64   `json:"confidence,omitempty"`
-	RulesTriggered     []string  `json:"rules_triggered,omitempty"`
-	RegimeID           string    `json:"regime_id,omitempty"`
-	DecisionConfidence float64   `json:"decision_confidence,omitempty"`
-	EntryPrice         float64   `json:"entry_price,omitempty"`
-	StopPrice          float64   `json:"stop_price,omitempty"`
-	Target1            float64   `json:"target_1,omitempty"`
-	Target2            float64   `json:"target_2,omitempty"`
+	ID                 int        `json:"id"`
+	Symbol             string     `json:"symbol"`
+	Signal             string     `json:"signal"`
+	Action             string     `json:"action"`
+	Confidence         float64    `json:"confidence,omitempty"`
+	RulesTriggered     []string   `json:"rules_triggered,omitempty"`
+	RegimeID           string     `json:"regime_id,omitempty"`
+	DecisionConfidence float64    `json:"decision_confidence,omitempty"`
+	EntryPrice         float64    `json:"entry_price,omitempty"`
+	StopPrice          float64    `json:"stop_price,omitempty"`
+	Target1            float64    `json:"target_1,omitempty"`
+	Target2            float64    `json:"target_2,omitempty"`
 	ValidUntil         *time.Time `json:"valid_until,omitempty"`
 	Outcome            string     `json:"outcome,omitempty"`
 	OutcomeAt          *time.Time `json:"outcome_at,omitempty"`
@@ -41,14 +41,14 @@ type FeedbackSummary struct {
 // RuleOutcomeQuality holds per-rule, per-regime signal quality metrics
 // based on actual price outcomes (did the signal hit its target or stop?).
 type RuleOutcomeQuality struct {
-	RuleName    string  `json:"rule_name"`
-	RegimeID    string  `json:"regime_id"`
-	SignalCount int     `json:"signal_count"`
-	WinCount    int     `json:"win_count"`
-	LossCount   int     `json:"loss_count"`
-	ExpiredCount int    `json:"expired_count"`
-	WinRate     float64 `json:"win_rate"`
-	Multiplier  float64 `json:"multiplier"`
+	RuleName     string  `json:"rule_name"`
+	RegimeID     string  `json:"regime_id"`
+	SignalCount  int     `json:"signal_count"`
+	WinCount     int     `json:"win_count"`
+	LossCount    int     `json:"loss_count"`
+	ExpiredCount int     `json:"expired_count"`
+	WinRate      float64 `json:"win_rate"`
+	Multiplier   float64 `json:"multiplier"`
 }
 
 // RuleAccuracy holds per-rule, per-regime accuracy metrics computed from signal_feedback.

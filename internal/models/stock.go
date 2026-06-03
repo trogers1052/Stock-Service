@@ -36,18 +36,18 @@ type Stock struct {
 
 // MonitoredStock represents a stock in our watchlist with buy zones and targets
 type MonitoredStock struct {
-	Symbol              string          `json:"symbol"`
-	Enabled             bool            `json:"enabled"`
-	Priority            int             `json:"priority"` // 1=high, 2=medium, 3=low
-	BuyZoneLow          *float64        `json:"buy_zone_low,omitempty"`
-	BuyZoneHigh         *float64        `json:"buy_zone_high,omitempty"`
-	TargetPrice         *float64        `json:"target_price,omitempty"`
-	StopLossPrice       *float64        `json:"stop_loss_price,omitempty"`
-	AlertOnBuyZone      bool            `json:"alert_on_buy_zone"`
-	AlertOnRSIOversold  bool            `json:"alert_on_rsi_oversold"`
-	RSIOversoldThreshold *float64       `json:"rsi_oversold_threshold,omitempty"`
-	Notes               string          `json:"notes,omitempty"`
-	Reason              string          `json:"reason,omitempty"`
-	AddedAt             time.Time       `json:"added_at"`
-	UpdatedAt           time.Time       `json:"updated_at"`
+	Symbol               string    `json:"symbol"`
+	Enabled              bool      `json:"enabled"`
+	Priority             int       `json:"priority"` // 1=high, 2=medium, 3=low
+	BuyZoneLow           *float64  `json:"buy_zone_low,omitempty"`
+	BuyZoneHigh          *float64  `json:"buy_zone_high,omitempty"`
+	TargetPrice          *float64  `json:"target_price,omitempty"`
+	StopLossPrice        *float64  `json:"stop_loss_price,omitempty"`
+	AlertOnBuyZone       bool      `json:"alert_on_buy_zone"`
+	AlertOnRSIOversold   bool      `json:"alert_on_rsi_oversold"`
+	RSIOversoldThreshold *float64  `json:"rsi_oversold_threshold,omitempty"`
+	Notes                string    `json:"notes,omitempty"`
+	Reason               string    `json:"reason,omitempty"`
+	AddedAt              time.Time `json:"added_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }

@@ -11,13 +11,13 @@ import (
 )
 
 const (
-	accuracyCacheKey          = "feedback:accuracy"
-	outcomeQualityCacheKey    = "feedback:outcome_quality"
-	accuracyCacheInterval     = 15 * time.Minute
-	accuracyCacheTTL          = 30 * time.Minute
-	accuracySinceDays         = 90
-	accuracyMinSignals        = 10
-	outcomeQualityMinSignals  = 5
+	accuracyCacheKey         = "feedback:accuracy"
+	outcomeQualityCacheKey   = "feedback:outcome_quality"
+	accuracyCacheInterval    = 15 * time.Minute
+	accuracyCacheTTL         = 30 * time.Minute
+	accuracySinceDays        = 90
+	accuracyMinSignals       = 10
+	outcomeQualityMinSignals = 5
 )
 
 // accuracyEntry is the per-rule data written to Redis.

@@ -117,10 +117,10 @@ func TestMonitoredStocksRepository(t *testing.T) {
 
 		buyZone := 450.00
 		monitored := &models.MonitoredStock{
-			Symbol:       "NVDA",
-			Enabled:      true,
-			Priority:     1,
-			BuyZoneLow:   &buyZone,
+			Symbol:         "NVDA",
+			Enabled:        true,
+			Priority:       1,
+			BuyZoneLow:     &buyZone,
 			AlertOnBuyZone: true,
 		}
 		err := testDB.CreateMonitoredStock(monitored)

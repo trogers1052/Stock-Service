@@ -22,18 +22,18 @@ func TestPositionsRepository(t *testing.T) {
 		testDB.TruncateAll(t)
 
 		position := &models.Position{
-			Symbol:          "AAPL",
-			Quantity:        decimal.NewFromFloat(100),
-			EntryPrice:      decimal.NewFromFloat(150.00),
-			EntryDate:       time.Now().Add(-7 * 24 * time.Hour),
-			CurrentPrice:    decimal.NewFromFloat(175.00),
+			Symbol:           "AAPL",
+			Quantity:         decimal.NewFromFloat(100),
+			EntryPrice:       decimal.NewFromFloat(150.00),
+			EntryDate:        time.Now().Add(-7 * 24 * time.Hour),
+			CurrentPrice:     decimal.NewFromFloat(175.00),
 			UnrealizedPnlPct: decimal.NewFromFloat(16.67),
-			DaysHeld:        7,
-			EntryRSI:        decimal.NewFromFloat(32.5),
-			EntryReason:     "RSI oversold bounce",
-			Sector:          "Technology",
-			Industry:        "Consumer Electronics",
-			PositionSizePct: decimal.NewFromFloat(10.0),
+			DaysHeld:         7,
+			EntryRSI:         decimal.NewFromFloat(32.5),
+			EntryReason:      "RSI oversold bounce",
+			Sector:           "Technology",
+			Industry:         "Consumer Electronics",
+			PositionSizePct:  decimal.NewFromFloat(10.0),
 		}
 
 		err := testDB.CreatePosition(position)

@@ -8,12 +8,12 @@ import (
 
 // Alert rule type constants
 const (
-	RuleTypePriceTarget      = "PRICE_TARGET"
-	RuleTypeRSIOversold      = "RSI_OVERSOLD"
-	RuleTypeRSIOverbought    = "RSI_OVERBOUGHT"
-	RuleTypeSupportBounce    = "SUPPORT_BOUNCE"
-	RuleTypeResistanceBreak  = "RESISTANCE_BREAK"
-	RuleTypeVolumeSpike      = "VOLUME_SPIKE"
+	RuleTypePriceTarget     = "PRICE_TARGET"
+	RuleTypeRSIOversold     = "RSI_OVERSOLD"
+	RuleTypeRSIOverbought   = "RSI_OVERBOUGHT"
+	RuleTypeSupportBounce   = "SUPPORT_BOUNCE"
+	RuleTypeResistanceBreak = "RESISTANCE_BREAK"
+	RuleTypeVolumeSpike     = "VOLUME_SPIKE"
 )
 
 // Comparison constants
@@ -41,20 +41,20 @@ const (
 
 // AlertRule represents a configurable alert condition
 type AlertRule struct {
-	ID                  int              `json:"id"`
-	Symbol              string           `json:"symbol"`
-	RuleType            string           `json:"rule_type"`
-	ConditionValue      decimal.Decimal  `json:"condition_value,omitempty"`
-	Comparison          string           `json:"comparison"`
-	Enabled             bool             `json:"enabled"`
-	TriggeredCount      int              `json:"triggered_count"`
-	LastTriggeredAt     *time.Time       `json:"last_triggered_at,omitempty"`
-	CooldownMinutes     int              `json:"cooldown_minutes"`
-	NotificationChannel string           `json:"notification_channel"`
-	MessageTemplate     string           `json:"message_template,omitempty"`
-	Priority            string           `json:"priority"`
-	CreatedAt           time.Time        `json:"created_at"`
-	UpdatedAt           time.Time        `json:"updated_at"`
+	ID                  int             `json:"id"`
+	Symbol              string          `json:"symbol"`
+	RuleType            string          `json:"rule_type"`
+	ConditionValue      decimal.Decimal `json:"condition_value,omitempty"`
+	Comparison          string          `json:"comparison"`
+	Enabled             bool            `json:"enabled"`
+	TriggeredCount      int             `json:"triggered_count"`
+	LastTriggeredAt     *time.Time      `json:"last_triggered_at,omitempty"`
+	CooldownMinutes     int             `json:"cooldown_minutes"`
+	NotificationChannel string          `json:"notification_channel"`
+	MessageTemplate     string          `json:"message_template,omitempty"`
+	Priority            string          `json:"priority"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
 }
 
 // AlertHistory represents a triggered alert record

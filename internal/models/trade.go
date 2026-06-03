@@ -23,33 +23,33 @@ const (
 
 // TradeHistory represents a completed/closed position with journal entries
 type TradeHistory struct {
-	ID                 int              `json:"id"`
-	Symbol             string           `json:"symbol"`
-	TradeType          string           `json:"trade_type"`
-	Quantity           decimal.Decimal  `json:"quantity"`
-	Price              decimal.Decimal  `json:"price"`
-	TotalCost          decimal.Decimal  `json:"total_cost"`
-	Fee                decimal.Decimal  `json:"fee"`
-	EntryDate          *time.Time       `json:"entry_date,omitempty"`
-	ExitDate           *time.Time       `json:"exit_date,omitempty"`
-	HoldingPeriodHours *int             `json:"holding_period_hours,omitempty"`
-	EntryRSI           decimal.Decimal  `json:"entry_rsi,omitempty"`
-	ExitRSI            decimal.Decimal  `json:"exit_rsi,omitempty"`
-	RealizedPnl        decimal.Decimal  `json:"realized_pnl,omitempty"`
-	RealizedPnlPct     decimal.Decimal  `json:"realized_pnl_pct,omitempty"`
-	MaxDrawdownPct     decimal.Decimal  `json:"max_drawdown_pct,omitempty"`
-	EntryReason        string           `json:"entry_reason,omitempty"`
-	ExitReason         string           `json:"exit_reason,omitempty"`
-	EmotionalState     *int             `json:"emotional_state,omitempty"`
-	ConvictionLevel    *int             `json:"conviction_level,omitempty"`
-	MarketConditions   string           `json:"market_conditions,omitempty"`
-	WhatWentRight      string           `json:"what_went_right,omitempty"`
-	WhatWentWrong      string           `json:"what_went_wrong,omitempty"`
-	TradeGrade         string           `json:"trade_grade,omitempty"`
-	StrategyTag        string           `json:"strategy_tag,omitempty"`
-	Notes              string           `json:"notes,omitempty"`
-	ExecutedAt         time.Time        `json:"executed_at"`
-	CreatedAt          time.Time        `json:"created_at"`
+	ID                 int             `json:"id"`
+	Symbol             string          `json:"symbol"`
+	TradeType          string          `json:"trade_type"`
+	Quantity           decimal.Decimal `json:"quantity"`
+	Price              decimal.Decimal `json:"price"`
+	TotalCost          decimal.Decimal `json:"total_cost"`
+	Fee                decimal.Decimal `json:"fee"`
+	EntryDate          *time.Time      `json:"entry_date,omitempty"`
+	ExitDate           *time.Time      `json:"exit_date,omitempty"`
+	HoldingPeriodHours *int            `json:"holding_period_hours,omitempty"`
+	EntryRSI           decimal.Decimal `json:"entry_rsi,omitempty"`
+	ExitRSI            decimal.Decimal `json:"exit_rsi,omitempty"`
+	RealizedPnl        decimal.Decimal `json:"realized_pnl,omitempty"`
+	RealizedPnlPct     decimal.Decimal `json:"realized_pnl_pct,omitempty"`
+	MaxDrawdownPct     decimal.Decimal `json:"max_drawdown_pct,omitempty"`
+	EntryReason        string          `json:"entry_reason,omitempty"`
+	ExitReason         string          `json:"exit_reason,omitempty"`
+	EmotionalState     *int            `json:"emotional_state,omitempty"`
+	ConvictionLevel    *int            `json:"conviction_level,omitempty"`
+	MarketConditions   string          `json:"market_conditions,omitempty"`
+	WhatWentRight      string          `json:"what_went_right,omitempty"`
+	WhatWentWrong      string          `json:"what_went_wrong,omitempty"`
+	TradeGrade         string          `json:"trade_grade,omitempty"`
+	StrategyTag        string          `json:"strategy_tag,omitempty"`
+	Notes              string          `json:"notes,omitempty"`
+	ExecutedAt         time.Time       `json:"executed_at"`
+	CreatedAt          time.Time       `json:"created_at"`
 }
 
 // RawTrade represents an individual trade execution from a broker
@@ -79,14 +79,14 @@ type TradeEvent struct {
 
 // TradeEventData contains the trade details from the event
 type TradeEventData struct {
-	OrderID      string  `json:"order_id"`
-	Symbol       string  `json:"symbol"`
-	Side         string  `json:"side"`
-	Quantity     string  `json:"quantity"`
-	AveragePrice string  `json:"average_price"`
-	TotalNotional string `json:"total_notional"`
-	Fees         string  `json:"fees"`
-	State        string  `json:"state"`
-	ExecutedAt   *string `json:"executed_at"`
-	CreatedAt    string  `json:"created_at"`
+	OrderID       string  `json:"order_id"`
+	Symbol        string  `json:"symbol"`
+	Side          string  `json:"side"`
+	Quantity      string  `json:"quantity"`
+	AveragePrice  string  `json:"average_price"`
+	TotalNotional string  `json:"total_notional"`
+	Fees          string  `json:"fees"`
+	State         string  `json:"state"`
+	ExecutedAt    *string `json:"executed_at"`
+	CreatedAt     string  `json:"created_at"`
 }

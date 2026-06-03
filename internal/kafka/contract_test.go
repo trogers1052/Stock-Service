@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	testkit "github.com/trogers1052/trading-testkit"
 	"github.com/trogers1052/stock-alert-system/internal/models"
+	testkit "github.com/trogers1052/trading-testkit"
 )
 
 func TestContract_TradeEvent_Consumer(t *testing.T) {

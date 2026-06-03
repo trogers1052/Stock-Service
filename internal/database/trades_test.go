@@ -260,7 +260,7 @@ func TestTradesRepository(t *testing.T) {
 		assert.Equal(t, 4, stats.TotalTrades)
 		assert.Equal(t, 2, stats.WinningTrades)
 		assert.Equal(t, 2, stats.LosingTrades)
-		assert.True(t, decimal.NewFromFloat(50.0).Equal(stats.WinRate)) // 50% win rate
+		assert.True(t, decimal.NewFromFloat(50.0).Equal(stats.WinRate))     // 50% win rate
 		assert.True(t, decimal.NewFromFloat(1500.00).Equal(stats.TotalPnl)) // 1000 + 2000 - 500 - 1000 = 1500
 	})
 
