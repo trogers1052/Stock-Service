@@ -16,7 +16,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/redpanda v0.40.0
-	github.com/trogers1052/trading-go-commons v0.1.0
+	github.com/trogers1052/trading-go-commons v0.2.0
 	github.com/trogers1052/trading-testkit v0.3.0
 )
 
