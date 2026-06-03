@@ -86,32 +86,6 @@ func TestRedisAddress_CustomPort(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// getEnv
-// ---------------------------------------------------------------------------
-
-func TestGetEnv_SetValue(t *testing.T) {
-	os.Setenv("TEST_CONFIG_KEY_12345", "custom_value")
-	defer os.Unsetenv("TEST_CONFIG_KEY_12345")
-
-	result := getEnv("TEST_CONFIG_KEY_12345", "default")
-	assert.Equal(t, "custom_value", result)
-}
-
-func TestGetEnv_Default(t *testing.T) {
-	os.Unsetenv("NONEXISTENT_KEY_67890")
-	result := getEnv("NONEXISTENT_KEY_67890", "fallback")
-	assert.Equal(t, "fallback", result)
-}
-
-func TestGetEnv_EmptyValueReturnsDefault(t *testing.T) {
-	os.Setenv("TEST_EMPTY_KEY", "")
-	defer os.Unsetenv("TEST_EMPTY_KEY")
-
-	result := getEnv("TEST_EMPTY_KEY", "default")
-	assert.Equal(t, "default", result)
-}
-
-// ---------------------------------------------------------------------------
 // Load defaults
 // ---------------------------------------------------------------------------
 

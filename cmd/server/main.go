@@ -4,9 +4,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -17,6 +14,7 @@ import (
 	"github.com/trogers1052/stock-alert-system/internal/database"
 	"github.com/trogers1052/stock-alert-system/internal/kafka"
 	"github.com/trogers1052/stock-alert-system/internal/redis"
+	"github.com/trogers1052/trading-go-commons/httpserver"
 )
 
 func main() {
@@ -28,7 +26,7 @@ func main() {
 	log.Println("Starting stock-service...")
 
 	// Metrics endpoint — Prometheus scrape target
-	startMetricsServer()
+	metricsSrv := startMetricsServer()
 
 	// Connect to database
 	db, err := database.New(cfg.Database.ConnectionString())
@@ -59,8 +57,8 @@ func main() {
 	defer producer.Close()
 	log.Printf("Kafka producer initialized (brokers: %v)", cfg.Kafka.Brokers)
 
-	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	// Create a context cancelled on SIGINT/SIGTERM for graceful shutdown.
+	ctx, cancel := httpserver.SignalContext()
 	defer cancel()
 
 	// Create and start Kafka consumer for trade events
@@ -140,10 +138,8 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	// Wait for interrupt signal (SignalContext is cancelled on SIGINT/SIGTERM).
+	<-ctx.Done()
 
 	log.Println("Shutting down stock-service...")
 
@@ -156,6 +152,11 @@ func main() {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	// Gracefully shut down the metrics server.
+	if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Error shutting down metrics server: %v", err)
 	}
 
 	// Close Kafka consumers

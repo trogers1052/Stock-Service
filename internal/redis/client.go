@@ -8,6 +8,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/trogers1052/stock-alert-system/internal/config"
+	"github.com/trogers1052/trading-go-commons/redisx"
 )
 
 // Client wraps the Redis client with stock-specific operations
@@ -17,7 +18,7 @@ type Client struct {
 
 // New creates a new Redis client
 func New(cfg config.RedisConfig) (*Client, error) {
-	rdb := redis.NewClient(&redis.Options{
+	rdb := redisx.NewClient(redisx.Options{
 		Addr:     cfg.Address(),
 		Password: cfg.Password,
 		DB:       cfg.DB,

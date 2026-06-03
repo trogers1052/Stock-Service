@@ -1,8 +1,9 @@
 package config
 
 import (
-	"os"
 	"strings"
+
+	"github.com/trogers1052/trading-go-commons/env"
 )
 
 // Config holds all application configuration
@@ -51,31 +52,31 @@ type RedisConfig struct {
 // Load reads configuration from environment variables
 func Load() *Config {
 	return &Config{
-		APIKey: getEnv("API_KEY", ""),
+		APIKey: env.String("API_KEY", ""),
 		Server: ServerConfig{
-			Port: getEnv("SERVER_PORT", "8081"),
-			Host: getEnv("SERVER_HOST", "0.0.0.0"),
+			Port: env.String("SERVER_PORT", "8081"),
+			Host: env.String("SERVER_HOST", "0.0.0.0"),
 		},
 		Database: DatabaseConfig{
-			Host:     getEnv("DB_HOST", "postgres"),
-			Port:     getEnv("DB_PORT", "5432"),
-			User:     getEnv("DB_USER", "trader"),
-			Password: getEnv("DB_PASSWORD", ""),
-			DBName:   getEnv("DB_NAME", "trading_platform"),
-			SSLMode:  getEnv("DB_SSLMODE", "disable"),
+			Host:     env.String("DB_HOST", "postgres"),
+			Port:     env.String("DB_PORT", "5432"),
+			User:     env.String("DB_USER", "trader"),
+			Password: env.String("DB_PASSWORD", ""),
+			DBName:   env.String("DB_NAME", "trading_platform"),
+			SSLMode:  env.String("DB_SSLMODE", "disable"),
 		},
 		Kafka: KafkaConfig{
-			Brokers:        parseBrokers(getEnv("KAFKA_BROKERS", "localhost:19092")),
-			Topic:          getEnv("KAFKA_TOPIC", "stock-events"),
-			TradesTopic:    getEnv("KAFKA_TRADES_TOPIC", "trading.orders"),
-			PositionsTopic: getEnv("KAFKA_POSITIONS_TOPIC", "trading.positions"),
-			WatchlistTopic: getEnv("KAFKA_WATCHLIST_TOPIC", "trading.watchlist"),
-			ConsumerGroup:  getEnv("KAFKA_CONSUMER_GROUP", "stock-service"),
+			Brokers:        parseBrokers(env.String("KAFKA_BROKERS", "localhost:19092")),
+			Topic:          env.String("KAFKA_TOPIC", "stock-events"),
+			TradesTopic:    env.String("KAFKA_TRADES_TOPIC", "trading.orders"),
+			PositionsTopic: env.String("KAFKA_POSITIONS_TOPIC", "trading.positions"),
+			WatchlistTopic: env.String("KAFKA_WATCHLIST_TOPIC", "trading.watchlist"),
+			ConsumerGroup:  env.String("KAFKA_CONSUMER_GROUP", "stock-service"),
 		},
 		Redis: RedisConfig{
-			Host:     getEnv("REDIS_HOST", "localhost"),
-			Port:     getEnv("REDIS_PORT", "6379"),
-			Password: getEnv("REDIS_PASSWORD", ""),
+			Host:     env.String("REDIS_HOST", "localhost"),
+			Port:     env.String("REDIS_PORT", "6379"),
+			Password: env.String("REDIS_PASSWORD", ""),
 			DB:       0,
 		},
 	}
@@ -84,13 +85,6 @@ func Load() *Config {
 // ConnectionString returns the PostgreSQL connection string
 func (d *DatabaseConfig) ConnectionString() string {
 	return "postgres://" + d.User + ":" + d.Password + "@" + d.Host + ":" + d.Port + "/" + d.DBName + "?sslmode=" + d.SSLMode
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }
 
 // parseBrokers splits a comma-separated broker list
