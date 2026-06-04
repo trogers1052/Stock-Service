@@ -2,121 +2,141 @@ package kafka
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
-	"github.com/segmentio/kafka-go"
 	"github.com/trogers1052/stock-alert-system/internal/models"
 )
 
-// tempError implements the Temporary() bool contract used by kafka-go to
-// classify transient vs permanent write failures.
-type tempError struct {
-	msg  string
-	temp bool
+// mockPublisher is a configurable publisher for unit tests. It records every
+// Publish call and can be made to fail with a fixed error.
+type mockPublisher struct {
+	calls   int
+	failErr error
+	closed  bool
+
+	lastTopic string
+	lastKey   []byte
+	lastValue []byte
 }
 
-func (e tempError) Error() string   { return e.msg }
-func (e tempError) Temporary() bool { return e.temp }
-
-// mockMessageWriter is a configurable messageWriter for unit tests. It fails
-// the first failUntil calls with failErr, then succeeds.
-type mockMessageWriter struct {
-	calls     int
-	failUntil int
-	failErr   error
-	closed    bool
-}
-
-func (m *mockMessageWriter) WriteMessages(_ context.Context, _ ...kafka.Message) error {
+func (m *mockPublisher) Publish(_ context.Context, topic string, key, value []byte) error {
 	m.calls++
-	if m.calls <= m.failUntil {
-		return m.failErr
-	}
-	return nil
+	m.lastTopic = topic
+	m.lastKey = key
+	m.lastValue = value
+	return m.failErr
 }
 
-func (m *mockMessageWriter) Close() error {
+func (m *mockPublisher) Close() error {
 	m.closed = true
 	return nil
 }
 
-func newTestProducer(w messageWriter) *Producer {
-	return &Producer{writer: w, topic: "test-topic"}
+func newTestProducer(p publisher) *Producer {
+	return &Producer{producer: p, topic: "test-topic"}
 }
 
 func testStock() *models.Stock {
 	return &models.Stock{Symbol: "AAPL"}
 }
 
-func TestPublish_TransientErrorIsRetriedThenSucceeds(t *testing.T) {
-	mw := &mockMessageWriter{
-		failUntil: 2, // fail twice, succeed on the third attempt
-		failErr:   tempError{msg: "transient broker timeout", temp: true},
-	}
-	p := newTestProducer(mw)
+// TestPublish_Success verifies a successful publish sends exactly one message
+// to the configured topic, keyed by symbol, carrying the JSON-marshaled event.
+func TestPublish_Success(t *testing.T) {
+	mp := &mockPublisher{}
+	p := newTestProducer(mp)
 
 	if err := p.PublishStockAdded(context.Background(), testStock()); err != nil {
-		t.Fatalf("expected success after retries, got error: %v", err)
+		t.Fatalf("expected success, got error: %v", err)
 	}
-	if mw.calls != 3 {
-		t.Fatalf("expected 3 write attempts (2 retries), got %d", mw.calls)
+	if mp.calls != 1 {
+		t.Fatalf("expected exactly 1 publish, got %d", mp.calls)
+	}
+	if mp.lastTopic != "test-topic" {
+		t.Fatalf("expected topic %q, got %q", "test-topic", mp.lastTopic)
+	}
+	if string(mp.lastKey) != "AAPL" {
+		t.Fatalf("expected key AAPL, got %q", string(mp.lastKey))
+	}
+
+	var event models.StockEvent
+	if err := json.Unmarshal(mp.lastValue, &event); err != nil {
+		t.Fatalf("published value is not valid StockEvent JSON: %v", err)
+	}
+	if event.EventType != "STOCK_ADDED" {
+		t.Fatalf("expected STOCK_ADDED, got %s", event.EventType)
+	}
+	if event.Symbol != "AAPL" {
+		t.Fatalf("expected symbol AAPL, got %s", event.Symbol)
 	}
 }
 
-func TestPublish_PermanentErrorSurfacesWithoutRetry(t *testing.T) {
-	permErr := tempError{msg: "invalid message: permanent", temp: false}
-	mw := &mockMessageWriter{
-		failUntil: maxWriteRetries + 5, // would keep failing if retried
-		failErr:   permErr,
-	}
-	p := newTestProducer(mw)
+// TestPublish_ErrorSurfaces verifies a producer error is wrapped and returned.
+func TestPublish_ErrorSurfaces(t *testing.T) {
+	wantErr := errors.New("broker unavailable")
+	mp := &mockPublisher{failErr: wantErr}
+	p := newTestProducer(mp)
 
 	err := p.PublishStockAdded(context.Background(), testStock())
 	if err == nil {
-		t.Fatal("expected permanent error to surface, got nil")
+		t.Fatal("expected error to surface, got nil")
 	}
-	if !errors.Is(err, permErr) {
-		t.Fatalf("expected wrapped permanent error, got: %v", err)
-	}
-	if mw.calls != 1 {
-		t.Fatalf("permanent error must not be retried: expected 1 attempt, got %d", mw.calls)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected wrapped producer error, got: %v", err)
 	}
 }
 
-func TestPublish_TransientErrorExhaustsRetriesAndSurfaces(t *testing.T) {
-	failErr := tempError{msg: "persistent transient failure", temp: true}
-	mw := &mockMessageWriter{
-		failUntil: maxWriteRetries + 10, // always fails
-		failErr:   failErr,
-	}
-	p := newTestProducer(mw)
+// TestPublishStockRemoved_KeyAndType verifies the removed event uses the symbol
+// as the key and the STOCK_REMOVED type.
+func TestPublishStockRemoved_KeyAndType(t *testing.T) {
+	mp := &mockPublisher{}
+	p := newTestProducer(mp)
 
-	err := p.PublishStockAdded(context.Background(), testStock())
-	if err == nil {
-		t.Fatal("expected error after exhausting retries, got nil")
+	if err := p.PublishStockRemoved(context.Background(), "MSFT"); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
 	}
-	if !errors.Is(err, failErr) {
-		t.Fatalf("expected wrapped transient error, got: %v", err)
+	if string(mp.lastKey) != "MSFT" {
+		t.Fatalf("expected key MSFT, got %q", string(mp.lastKey))
 	}
-	if mw.calls != maxWriteRetries+1 {
-		t.Fatalf("expected %d attempts, got %d", maxWriteRetries+1, mw.calls)
+
+	var event models.StockEvent
+	if err := json.Unmarshal(mp.lastValue, &event); err != nil {
+		t.Fatalf("published value is not valid StockEvent JSON: %v", err)
+	}
+	if event.EventType != "STOCK_REMOVED" {
+		t.Fatalf("expected STOCK_REMOVED, got %s", event.EventType)
 	}
 }
 
-func TestPublish_ContextCancellationStopsRetry(t *testing.T) {
-	mw := &mockMessageWriter{
-		failUntil: maxWriteRetries + 10,
-		failErr:   tempError{msg: "transient", temp: true},
+// TestPublishStockUpdated_Type verifies the updated event type.
+func TestPublishStockUpdated_Type(t *testing.T) {
+	mp := &mockPublisher{}
+	p := newTestProducer(mp)
+
+	if err := p.PublishStockUpdated(context.Background(), testStock()); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
 	}
-	p := newTestProducer(mw)
 
-	// Cancel quickly so the backoff wait between retries is interrupted.
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
+	var event models.StockEvent
+	if err := json.Unmarshal(mp.lastValue, &event); err != nil {
+		t.Fatalf("published value is not valid StockEvent JSON: %v", err)
+	}
+	if event.EventType != "STOCK_UPDATED" {
+		t.Fatalf("expected STOCK_UPDATED, got %s", event.EventType)
+	}
+}
 
-	if err := p.PublishStockAdded(ctx, testStock()); err == nil {
-		t.Fatal("expected error when context is cancelled during retries")
+// TestProducerClose verifies Close delegates to the underlying publisher.
+func TestProducerClose(t *testing.T) {
+	mp := &mockPublisher{}
+	p := newTestProducer(mp)
+
+	if err := p.Close(); err != nil {
+		t.Fatalf("expected Close to succeed, got: %v", err)
+	}
+	if !mp.closed {
+		t.Fatal("expected underlying publisher to be closed")
 	}
 }

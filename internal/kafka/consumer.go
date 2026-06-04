@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/IBM/sarama"
 	"github.com/shopspring/decimal"
 	"github.com/trogers1052/stock-alert-system/internal/metrics"
 	"github.com/trogers1052/stock-alert-system/internal/models"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 )
 
 // RawTradeRepository defines the interface for raw trade database operations
@@ -25,69 +26,65 @@ type RawTradeRepository interface {
 // Positions are managed separately via the PositionsConsumer which
 // receives position snapshots directly from Robinhood.
 type Consumer struct {
-	reader *kafka.Reader
-	repo   RawTradeRepository
+	group commonsConsumerGroup
+	topic string
+	repo  RawTradeRepository
 }
 
-// NewConsumer creates a new Kafka consumer for trade events
-func NewConsumer(brokers []string, topic, groupID string, repo RawTradeRepository) *Consumer {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     brokers,
-		Topic:       topic,
-		GroupID:     groupID,
-		MinBytes:    10e3, // 10KB
-		MaxBytes:    10e6, // 10MB
-		MaxWait:     1 * time.Second,
-		StartOffset: kafka.FirstOffset,
-	})
-
-	return &Consumer{
-		reader: reader,
-		repo:   repo,
+// NewConsumer creates a new Kafka consumer for trade events. It joins the
+// consumer group groupID and (for a brand-new group) starts at the OLDEST
+// offset, matching the prior kafka-go StartOffset: FirstOffset behavior.
+//
+// On a handler (processing) error the message is NOT committed and is
+// redelivered on the next session (Halt policy), preserving the prior
+// "don't commit — message will be redelivered" semantics so a failed DB
+// write is never silently dropped.
+func NewConsumer(brokers []string, topic, groupID string, repo RawTradeRepository) (*Consumer, error) {
+	c := &Consumer{
+		topic: topic,
+		repo:  repo,
 	}
+
+	group, err := commonskafka.NewConsumerGroup(
+		brokers,
+		groupID,
+		[]string{topic},
+		c.handle,
+		commonskafka.WithInitialOffset(sarama.OffsetOldest),
+		commonskafka.WithOnError(commonskafka.Halt),
+		commonskafka.WithConsumerClientID("stock-service"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kafka consumer group: %w", err)
+	}
+	c.group = group
+	return c, nil
 }
 
-// Start begins consuming messages from Kafka
+// Start begins consuming messages from Kafka. It blocks until ctx is cancelled.
 func (c *Consumer) Start(ctx context.Context) error {
-	log.Printf("Starting Kafka consumer for topic: %s", c.reader.Config().Topic)
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("Kafka consumer shutting down...")
-			return c.reader.Close()
-		default:
-			topic := c.reader.Config().Topic
-			msg, err := c.reader.FetchMessage(ctx)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil // Context cancelled, normal shutdown
-				}
-				metrics.KafkaConsumerErrors.WithLabelValues(topic).Inc()
-				log.Printf("Error reading message: %v", err)
-				continue
-			}
-
-			metrics.KafkaConsumed.WithLabelValues(topic).Inc()
-
-			if err := c.processMessage(msg); err != nil {
-				metrics.KafkaConsumerErrors.WithLabelValues(topic).Inc()
-				log.Printf("Error processing message: %v", err)
-				// Don't commit — message will be redelivered on restart
-				continue
-			}
-
-			if err := c.reader.CommitMessages(ctx, msg); err != nil {
-				log.Printf("Error committing offset: %v", err)
-			}
-		}
-	}
+	log.Printf("Starting Kafka consumer for topic: %s", c.topic)
+	return c.group.Run(ctx)
 }
 
-// processMessage handles a single Kafka message
-func (c *Consumer) processMessage(msg kafka.Message) error {
+// handle is the ConsumerGroup Handler: it records metrics and dispatches each
+// message to processMessage. Returning an error triggers the Halt policy
+// (offset not committed; redelivered next session).
+func (c *Consumer) handle(_ context.Context, msg *commonskafka.Message) error {
+	metrics.KafkaConsumed.WithLabelValues(c.topic).Inc()
+
+	if err := c.processMessage(msg.Value); err != nil {
+		metrics.KafkaConsumerErrors.WithLabelValues(c.topic).Inc()
+		log.Printf("Error processing message: %v", err)
+		return err
+	}
+	return nil
+}
+
+// processMessage handles a single Kafka message payload
+func (c *Consumer) processMessage(value []byte) error {
 	var event models.TradeEvent
-	if err := json.Unmarshal(msg.Value, &event); err != nil {
+	if err := json.Unmarshal(value, &event); err != nil {
 		return fmt.Errorf("failed to unmarshal trade event: %w", err)
 	}
 
@@ -192,5 +189,13 @@ func (c *Consumer) convertEventToRawTrade(event models.TradeEvent) (*models.RawT
 
 // Close closes the Kafka consumer
 func (c *Consumer) Close() error {
-	return c.reader.Close()
+	return c.group.Close()
+}
+
+// commonsConsumerGroup is the subset of the shared ConsumerGroup used here,
+// extracted as an interface so the consumer lifecycle can be unit-tested with
+// a fake group.
+type commonsConsumerGroup interface {
+	Run(ctx context.Context) error
+	Close() error
 }

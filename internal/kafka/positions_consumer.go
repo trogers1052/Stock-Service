@@ -7,10 +7,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/IBM/sarama"
 	"github.com/shopspring/decimal"
 	"github.com/trogers1052/stock-alert-system/internal/metrics"
 	"github.com/trogers1052/stock-alert-system/internal/models"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 )
 
 // PositionsRepository defines the interface for position database operations
@@ -18,79 +19,66 @@ type PositionsRepository interface {
 	ReplaceAllPositions(positions []*models.Position) error
 }
 
-// positionsReader is a small interface wrapper around kafka.Reader to enable unit testing.
-type positionsReader interface {
-	FetchMessage(ctx context.Context) (kafka.Message, error)
-	CommitMessages(ctx context.Context, msgs ...kafka.Message) error
-	Close() error
-	Config() kafka.ReaderConfig
-}
-
 // PositionsConsumer handles consuming position snapshot events from Kafka
 type PositionsConsumer struct {
-	reader positionsReader
-	repo   PositionsRepository
+	group commonsConsumerGroup
+	topic string
+	repo  PositionsRepository
 }
 
-// NewPositionsConsumer creates a new Kafka consumer for position events
-func NewPositionsConsumer(brokers []string, topic, groupID string, repo PositionsRepository) *PositionsConsumer {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     brokers,
-		Topic:       topic,
-		GroupID:     groupID + "-positions", // Separate consumer group for positions
-		MinBytes:    10e3,                   // 10KB
-		MaxBytes:    10e6,                   // 10MB
-		MaxWait:     1 * time.Second,
-		StartOffset: kafka.LastOffset, // Only read new messages (not historical)
-	})
-
-	return &PositionsConsumer{
-		reader: reader,
-		repo:   repo,
+// NewPositionsConsumer creates a new Kafka consumer for position events. It
+// uses a dedicated consumer group (groupID + "-positions") and, for a brand-new
+// group, starts at the NEWEST offset — only reading new messages, not history —
+// matching the prior kafka-go StartOffset: LastOffset behavior.
+//
+// On a handler (processing) error the message is NOT committed and is
+// redelivered on the next session (Halt policy), preserving the prior
+// "don't commit — message will be redelivered" semantics.
+func NewPositionsConsumer(brokers []string, topic, groupID string, repo PositionsRepository) (*PositionsConsumer, error) {
+	c := &PositionsConsumer{
+		topic: topic,
+		repo:  repo,
 	}
+
+	group, err := commonskafka.NewConsumerGroup(
+		brokers,
+		groupID+"-positions", // Separate consumer group for positions
+		[]string{topic},
+		c.handle,
+		commonskafka.WithInitialOffset(sarama.OffsetNewest), // Only read new messages (not historical)
+		commonskafka.WithOnError(commonskafka.Halt),
+		commonskafka.WithConsumerClientID("stock-service"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kafka positions consumer group: %w", err)
+	}
+	c.group = group
+	return c, nil
 }
 
-// Start begins consuming messages from Kafka
+// Start begins consuming messages from Kafka. It blocks until ctx is cancelled.
 func (c *PositionsConsumer) Start(ctx context.Context) error {
-	log.Printf("Starting Kafka positions consumer for topic: %s", c.reader.Config().Topic)
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("Positions consumer shutting down...")
-			return c.reader.Close()
-		default:
-			topic := c.reader.Config().Topic
-			msg, err := c.reader.FetchMessage(ctx)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil // Context cancelled, normal shutdown
-				}
-				metrics.KafkaConsumerErrors.WithLabelValues(topic).Inc()
-				log.Printf("Error reading positions message: %v", err)
-				continue
-			}
-
-			metrics.KafkaConsumed.WithLabelValues(topic).Inc()
-
-			if err := c.processMessage(msg); err != nil {
-				metrics.KafkaConsumerErrors.WithLabelValues(topic).Inc()
-				log.Printf("Error processing positions message: %v", err)
-				// Don't commit — message will be redelivered on restart
-				continue
-			}
-
-			if err := c.reader.CommitMessages(ctx, msg); err != nil {
-				log.Printf("Error committing positions offset: %v", err)
-			}
-		}
-	}
+	log.Printf("Starting Kafka positions consumer for topic: %s", c.topic)
+	return c.group.Run(ctx)
 }
 
-// processMessage handles a single Kafka message
-func (c *PositionsConsumer) processMessage(msg kafka.Message) error {
+// handle is the ConsumerGroup Handler: records metrics and dispatches each
+// message to processMessage. Returning an error triggers the Halt policy.
+func (c *PositionsConsumer) handle(_ context.Context, msg *commonskafka.Message) error {
+	metrics.KafkaConsumed.WithLabelValues(c.topic).Inc()
+
+	if err := c.processMessage(msg.Value); err != nil {
+		metrics.KafkaConsumerErrors.WithLabelValues(c.topic).Inc()
+		log.Printf("Error processing positions message: %v", err)
+		return err
+	}
+	return nil
+}
+
+// processMessage handles a single Kafka message payload
+func (c *PositionsConsumer) processMessage(value []byte) error {
 	var event models.PositionsEvent
-	if err := json.Unmarshal(msg.Value, &event); err != nil {
+	if err := json.Unmarshal(value, &event); err != nil {
 		return fmt.Errorf("failed to unmarshal positions event: %w", err)
 	}
 
@@ -169,5 +157,5 @@ func (c *PositionsConsumer) convertPositionData(pd models.PositionData, now time
 
 // Close closes the Kafka consumer
 func (c *PositionsConsumer) Close() error {
-	return c.reader.Close()
+	return c.group.Close()
 }

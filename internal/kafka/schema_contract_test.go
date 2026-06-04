@@ -6,27 +6,34 @@ import (
 	"testing"
 	"time"
 
-	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/trogers1052/stock-alert-system/internal/models"
 	schemas "github.com/trogers1052/trading-event-schemas"
 )
 
-// capturingWriter is a messageWriter that records the bytes the real producer
+// capturedMessage records the topic/key/value the real producer marshals and
+// hands to the shared Kafka producer.
+type capturedMessage struct {
+	Topic string
+	Key   []byte
+	Value []byte
+}
+
+// capturingPublisher is a publisher that records the bytes the real producer
 // marshals and hands to Kafka. It lets the schema-contract test exercise the
 // exact production marshaling path (Producer.publish -> json.Marshal) rather
 // than re-marshaling a struct by hand in the test.
-type capturingWriter struct {
-	captured []kafka.Message
+type capturingPublisher struct {
+	captured []capturedMessage
 }
 
-func (w *capturingWriter) WriteMessages(_ context.Context, msgs ...kafka.Message) error {
-	w.captured = append(w.captured, msgs...)
+func (w *capturingPublisher) Publish(_ context.Context, topic string, key, value []byte) error {
+	w.captured = append(w.captured, capturedMessage{Topic: topic, Key: key, Value: value})
 	return nil
 }
 
-func (w *capturingWriter) Close() error { return nil }
+func (w *capturingPublisher) Close() error { return nil }
 
 // TestSchemaContract_StockEvent_Producer drives the real producer marshaling
 // path (NewProducer's struct/JSON tags via PublishStockAdded -> publish) and
@@ -34,7 +41,7 @@ func (w *capturingWriter) Close() error { return nil }
 // stock_event JSON Schema. This catches producer/contract drift at the wire
 // level.
 func TestSchemaContract_StockEvent_Producer(t *testing.T) {
-	cw := &capturingWriter{}
+	cw := &capturingPublisher{}
 	p := newTestProducer(cw)
 
 	stock := &models.Stock{

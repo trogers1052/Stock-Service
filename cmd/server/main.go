@@ -53,7 +53,10 @@ func main() {
 	}
 
 	// Create Kafka producer
-	producer := kafka.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.Topic)
+	producer, err := kafka.NewProducer(cfg.Kafka.Brokers, cfg.Kafka.Topic)
+	if err != nil {
+		log.Fatalf("Failed to create Kafka producer: %v", err)
+	}
 	defer producer.Close()
 	log.Printf("Kafka producer initialized (brokers: %v)", cfg.Kafka.Brokers)
 
@@ -62,12 +65,15 @@ func main() {
 	defer cancel()
 
 	// Create and start Kafka consumer for trade events
-	consumer := kafka.NewConsumer(
+	consumer, err := kafka.NewConsumer(
 		cfg.Kafka.Brokers,
 		cfg.Kafka.TradesTopic,
 		cfg.Kafka.ConsumerGroup,
 		db,
 	)
+	if err != nil {
+		log.Fatalf("Failed to create Kafka consumer: %v", err)
+	}
 	go func() {
 		log.Printf("Starting Kafka consumer for topic: %s (group: %s)",
 			cfg.Kafka.TradesTopic, cfg.Kafka.ConsumerGroup)
@@ -77,12 +83,15 @@ func main() {
 	}()
 
 	// Create and start Kafka consumer for position snapshots
-	positionsConsumer := kafka.NewPositionsConsumer(
+	positionsConsumer, err := kafka.NewPositionsConsumer(
 		cfg.Kafka.Brokers,
 		cfg.Kafka.PositionsTopic,
 		cfg.Kafka.ConsumerGroup,
 		db,
 	)
+	if err != nil {
+		log.Fatalf("Failed to create Kafka positions consumer: %v", err)
+	}
 	go func() {
 		log.Printf("Starting Kafka positions consumer for topic: %s (group: %s-positions)",
 			cfg.Kafka.PositionsTopic, cfg.Kafka.ConsumerGroup)
@@ -92,12 +101,15 @@ func main() {
 	}()
 
 	// Create and start Kafka consumer for watchlist events
-	watchlistConsumer := kafka.NewWatchlistConsumer(
+	watchlistConsumer, err := kafka.NewWatchlistConsumer(
 		cfg.Kafka.Brokers,
 		cfg.Kafka.WatchlistTopic,
 		cfg.Kafka.ConsumerGroup,
 		db,
 	)
+	if err != nil {
+		log.Fatalf("Failed to create Kafka watchlist consumer: %v", err)
+	}
 	go func() {
 		log.Printf("Starting Kafka watchlist consumer for topic: %s (group: %s-watchlist)",
 			cfg.Kafka.WatchlistTopic, cfg.Kafka.ConsumerGroup)

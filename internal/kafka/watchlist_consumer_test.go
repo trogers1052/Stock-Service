@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	kafkago "github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 )
 
 // ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ func TestWatchlistConsumer_processMessage_WatchlistUpdated(t *testing.T) {
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err)
 
 	upserts := repo.Upserts()
@@ -119,7 +119,7 @@ func TestWatchlistConsumer_processMessage_SymbolAdded(t *testing.T) {
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err)
 
 	upserts := repo.Upserts()
@@ -142,7 +142,7 @@ func TestWatchlistConsumer_processMessage_SymbolAdded_EmptyName(t *testing.T) {
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err)
 
 	upserts := repo.Upserts()
@@ -165,7 +165,7 @@ func TestWatchlistConsumer_processMessage_SymbolRemoved(t *testing.T) {
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err)
 
 	// Removed symbols are NOT deleted, just logged
@@ -183,7 +183,7 @@ func TestWatchlistConsumer_processMessage_UnknownEventType(t *testing.T) {
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err) // Unknown types are silently ignored
 	assert.Empty(t, repo.Upserts())
 }
@@ -192,7 +192,7 @@ func TestWatchlistConsumer_processMessage_InvalidJSON(t *testing.T) {
 	repo := &mockStockRepo{}
 	consumer := &WatchlistConsumer{repo: repo}
 
-	err := consumer.processMessage(kafkago.Message{Value: []byte("{invalid")})
+	err := consumer.processMessage([]byte("{invalid"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unmarshal")
 }
@@ -211,7 +211,7 @@ func TestWatchlistConsumer_processMessage_EmptyAddedSymbols(t *testing.T) {
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err)
 	assert.Empty(t, repo.Upserts())
 }
@@ -302,7 +302,7 @@ func TestWatchlistConsumer_handleSymbolAdded_WithSector(t *testing.T) {
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err)
 
 	upserts := repo.Upserts()
@@ -330,7 +330,7 @@ func TestWatchlistConsumer_handleWatchlistUpdated_WithSectorFromStocks(t *testin
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err)
 
 	upserts := repo.Upserts()
@@ -359,7 +359,7 @@ func TestWatchlistConsumer_handleWatchlistUpdated_MixedSectorAndNoSector(t *test
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err)
 
 	upserts := repo.Upserts()
@@ -373,72 +373,70 @@ func TestWatchlistConsumer_handleWatchlistUpdated_MixedSectorAndNoSector(t *test
 }
 
 // ---------------------------------------------------------------------------
-// Start lifecycle (uses mock reader, similar to positions_consumer_test)
+// Handler + Start lifecycle (uses the shared ConsumerGroup Handler/fake group)
 // ---------------------------------------------------------------------------
 
-type mockWatchlistReader struct {
-	cfg  kafkago.ReaderConfig
-	msgs chan kafkago.Message
-
-	mu         sync.Mutex
-	closeCalls int
-}
-
-func newMockWatchlistReader(topic string, buffer int) *mockWatchlistReader {
-	return &mockWatchlistReader{
-		cfg:  kafkago.ReaderConfig{Topic: topic},
-		msgs: make(chan kafkago.Message, buffer),
-	}
-}
-
-func (r *mockWatchlistReader) ReadMessage(ctx context.Context) (kafkago.Message, error) {
-	select {
-	case msg := <-r.msgs:
-		return msg, nil
-	case <-ctx.Done():
-		return kafkago.Message{}, ctx.Err()
-	}
-}
-
-func (r *mockWatchlistReader) Close() error {
-	r.mu.Lock()
-	r.closeCalls++
-	r.mu.Unlock()
-	return nil
-}
-
-func (r *mockWatchlistReader) Config() kafkago.ReaderConfig {
-	return r.cfg
-}
-
-func TestWatchlistConsumer_Start_ProcessesMessage(t *testing.T) {
+// TestWatchlistConsumer_handle_ProcessesMessage drives the handler path (the
+// same path the shared ConsumerGroup invokes per message) and asserts the event
+// is dispatched into the existing processing/DB logic.
+func TestWatchlistConsumer_handle_ProcessesMessage(t *testing.T) {
 	repo := &mockStockRepo{}
-	reader := newMockWatchlistReader("watchlist-topic", 1)
+	consumer := &WatchlistConsumer{repo: repo, topic: "watchlist-topic"}
 
-	// WatchlistConsumer uses *kafka.Reader but we need to use our mock.
-	// Since the reader field is unexported and typed as *kafka.Reader, we
-	// construct the consumer manually (same pattern as positions_consumer_test).
-	// However, the WatchlistConsumer uses *kafka.Reader (concrete), not an interface.
-	// We can only test processMessage directly, which we've already done above.
-	// The Start method requires a real kafka.Reader.
-	// Instead, let's verify context cancellation via processMessage + direct call.
-
-	_ = reader // reader not usable because WatchlistConsumer.reader is *kafka.Reader not interface
-
-	// Test that processMessage can handle a well-formed message
-	consumer := &WatchlistConsumer{repo: repo}
 	event := WatchlistEvent{
 		EventType: "WATCHLIST_SYMBOL_ADDED",
 		Data:      WatchlistEventData{Symbol: "NVDA", Name: "NVIDIA Corp"},
 	}
-	payload, _ := json.Marshal(event)
+	payload, err := json.Marshal(event)
+	require.NoError(t, err)
 
-	err := consumer.processMessage(kafkago.Message{Value: payload})
+	err = consumer.handle(context.Background(), &commonskafka.Message{Value: payload})
 	require.NoError(t, err)
 
 	upserts := repo.Upserts()
 	require.Len(t, upserts, 1)
 	assert.Equal(t, "NVDA", upserts[0].Symbol)
+}
+
+// TestWatchlistConsumer_handle_ErrorPropagates verifies a processing error is
+// returned from the handler so the shared ConsumerGroup applies its error
+// policy (Halt: do not commit, redeliver next session).
+func TestWatchlistConsumer_handle_ErrorPropagates(t *testing.T) {
+	consumer := &WatchlistConsumer{repo: &mockStockRepo{err: assert.AnError}, topic: "watchlist-topic"}
+
+	event := WatchlistEvent{
+		EventType: "WATCHLIST_SYMBOL_ADDED",
+		Data:      WatchlistEventData{Symbol: "ERR"},
+	}
+	payload, err := json.Marshal(event)
+	require.NoError(t, err)
+
+	err = consumer.handle(context.Background(), &commonskafka.Message{Value: payload})
+	require.Error(t, err)
+}
+
+// TestWatchlistConsumer_Start_runsAndShutsDown verifies Start delegates to the
+// consumer group's Run and returns cleanly when the context is cancelled.
+func TestWatchlistConsumer_Start_runsAndShutsDown(t *testing.T) {
+	fake := &fakeConsumerGroup{}
+	consumer := &WatchlistConsumer{group: fake, topic: "watchlist-topic", repo: &mockStockRepo{}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- consumer.Start(ctx) }()
+
+	cancel()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for watchlist consumer to shut down")
+	}
+
+	fake.mu.Lock()
+	assert.Equal(t, 1, fake.runCalls)
+	fake.mu.Unlock()
 }
 
 // ---------------------------------------------------------------------------

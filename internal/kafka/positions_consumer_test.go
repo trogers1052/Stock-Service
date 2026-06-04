@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/segmentio/kafka-go"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/trogers1052/stock-alert-system/internal/models"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 )
 
 type mockPositionsRepo struct {
@@ -48,43 +48,27 @@ func (m *mockPositionsRepo) LastPositions() []*models.Position {
 	return m.last
 }
 
-type mockPositionsReader struct {
-	cfg  kafka.ReaderConfig
-	msgs chan kafka.Message
-
+// fakeConsumerGroup is a commonsConsumerGroup that blocks Run until ctx is
+// cancelled, mimicking the shared ConsumerGroup lifecycle for unit tests.
+type fakeConsumerGroup struct {
 	mu         sync.Mutex
+	runCalls   int
 	closeCalls int
 }
 
-func newMockPositionsReader(topic string, buffer int) *mockPositionsReader {
-	return &mockPositionsReader{
-		cfg:  kafka.ReaderConfig{Topic: topic},
-		msgs: make(chan kafka.Message, buffer),
-	}
-}
-
-func (r *mockPositionsReader) FetchMessage(ctx context.Context) (kafka.Message, error) {
-	select {
-	case msg := <-r.msgs:
-		return msg, nil
-	case <-ctx.Done():
-		return kafka.Message{}, ctx.Err()
-	}
-}
-
-func (r *mockPositionsReader) CommitMessages(_ context.Context, _ ...kafka.Message) error {
+func (f *fakeConsumerGroup) Run(ctx context.Context) error {
+	f.mu.Lock()
+	f.runCalls++
+	f.mu.Unlock()
+	<-ctx.Done()
 	return nil
 }
 
-func (r *mockPositionsReader) Close() error {
-	r.mu.Lock()
-	r.closeCalls++
-	r.mu.Unlock()
+func (f *fakeConsumerGroup) Close() error {
+	f.mu.Lock()
+	f.closeCalls++
+	f.mu.Unlock()
 	return nil
-}
-
-func (r *mockPositionsReader) Config() kafka.ReaderConfig {
-	return r.cfg
 }
 
 func TestPositionsConsumer_processMessage_ignoresNonSnapshotEventTypes(t *testing.T) {
@@ -100,23 +84,17 @@ func TestPositionsConsumer_processMessage_ignoresNonSnapshotEventTypes(t *testin
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = consumer.processMessage(kafka.Message{Value: payload})
+	err = consumer.processMessage(payload)
 	require.NoError(t, err)
 	assert.Equal(t, 0, repo.Calls())
 }
 
-func TestPositionsConsumer_Start_consumesAndProcessesMessages(t *testing.T) {
+// TestPositionsConsumer_handle_consumesAndProcessesMessages drives the handler
+// path (the same path the shared ConsumerGroup invokes per message) and asserts
+// the snapshot is converted and persisted.
+func TestPositionsConsumer_handle_consumesAndProcessesMessages(t *testing.T) {
 	repo := &mockPositionsRepo{called: make(chan struct{}, 1)}
-	reader := newMockPositionsReader("positions-topic", 1)
-	consumer := &PositionsConsumer{reader: reader, repo: repo}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- consumer.Start(ctx)
-	}()
+	consumer := &PositionsConsumer{repo: repo, topic: "positions-topic"}
 
 	event := models.PositionsEvent{
 		EventType: "POSITIONS_SNAPSHOT",
@@ -138,23 +116,8 @@ func TestPositionsConsumer_Start_consumesAndProcessesMessages(t *testing.T) {
 	payload, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	reader.msgs <- kafka.Message{Value: payload}
-
-	select {
-	case <-repo.called:
-		// processed
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for positions snapshot to be processed")
-	}
-
-	cancel()
-
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for consumer to shut down")
-	}
+	err = consumer.handle(context.Background(), &commonskafka.Message{Value: payload})
+	require.NoError(t, err)
 
 	require.Equal(t, 1, repo.Calls())
 	positions := repo.LastPositions()
@@ -167,4 +130,28 @@ func TestPositionsConsumer_Start_consumesAndProcessesMessages(t *testing.T) {
 	assert.True(t, p.CurrentPrice.Equal(decimal.RequireFromString("110")))
 	assert.True(t, p.UnrealizedPnlPct.Equal(decimal.RequireFromString("10")))
 	assert.False(t, p.EntryDate.IsZero())
+}
+
+// TestPositionsConsumer_Start_runsAndShutsDown verifies Start delegates to the
+// consumer group's Run and returns cleanly when the context is cancelled.
+func TestPositionsConsumer_Start_runsAndShutsDown(t *testing.T) {
+	fake := &fakeConsumerGroup{}
+	consumer := &PositionsConsumer{group: fake, topic: "positions-topic", repo: &mockPositionsRepo{}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- consumer.Start(ctx) }()
+
+	cancel()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for consumer to shut down")
+	}
+
+	fake.mu.Lock()
+	assert.Equal(t, 1, fake.runCalls)
+	fake.mu.Unlock()
 }

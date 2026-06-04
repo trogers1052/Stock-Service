@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	segkafka "github.com/segmentio/kafka-go"
+	"github.com/IBM/sarama"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/redpanda"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 
 	"github.com/trogers1052/stock-alert-system/internal/models"
 )
@@ -60,6 +61,23 @@ func setupRedpanda(t *testing.T) []string {
 	return []string{broker}
 }
 
+// createTopic creates a single-partition topic via the sarama cluster admin so
+// the consumer group has something to read.
+func createTopic(t *testing.T, brokers []string, topic string) {
+	t.Helper()
+	cfg := sarama.NewConfig()
+	cfg.Version = sarama.V2_8_0_0
+	admin, err := sarama.NewClusterAdmin(brokers, cfg)
+	require.NoError(t, err)
+	defer func() { _ = admin.Close() }()
+
+	err = admin.CreateTopic(topic, &sarama.TopicDetail{
+		NumPartitions:     1,
+		ReplicationFactor: 1,
+	}, false)
+	require.NoError(t, err)
+}
+
 func TestProducerAndConsumerRoundTrip(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -68,24 +86,18 @@ func TestProducerAndConsumerRoundTrip(t *testing.T) {
 	brokers := setupRedpanda(t)
 	const topic = "trading.orders.test"
 
-	// Create the topic up front so the consumer group has something to read.
-	conn, err := segkafka.DialContext(context.Background(), "tcp", brokers[0])
-	require.NoError(t, err)
-	require.NoError(t, conn.CreateTopics(segkafka.TopicConfig{
-		Topic: topic, NumPartitions: 1, ReplicationFactor: 1,
-	}))
-	_ = conn.Close()
+	createTopic(t, brokers, topic)
 
 	repo := newCaptureRepo()
-	consumer := NewConsumer(brokers, topic, "stock-service-test", repo)
+	consumer, err := NewConsumer(brokers, topic, "stock-service-test", repo)
+	require.NoError(t, err)
 	require.NotNil(t, consumer)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- consumer.Start(ctx) }()
 
-	// Produce a TRADE_DETECTED event onto the topic. The trade consumer reads
-	// raw segmentio messages, so write directly with a writer.
+	// Produce a TRADE_DETECTED event onto the topic via the shared producer.
 	executedAt := time.Now().UTC().Format(time.RFC3339)
 	event := models.TradeEvent{
 		EventType: "TRADE_DETECTED",
@@ -104,10 +116,12 @@ func TestProducerAndConsumerRoundTrip(t *testing.T) {
 		},
 	}
 
-	w := &segkafka.Writer{Addr: segkafka.TCP(brokers...), Topic: topic, Balancer: &segkafka.LeastBytes{}}
-	defer w.Close()
-	payload := mustMarshal(t, event)
-	writeWithRetry(t, w, segkafka.Message{Key: []byte("AAPL"), Value: payload})
+	prod, err := commonskafka.NewProducer(brokers)
+	require.NoError(t, err)
+	defer prod.Close()
+	publishWithRetry(t, func() error {
+		return prod.Publish(context.Background(), topic, []byte("AAPL"), mustMarshal(t, event))
+	})
 
 	select {
 	case <-repo.signal:
@@ -170,15 +184,11 @@ func TestWatchlistConsumerRoundTrip(t *testing.T) {
 	brokers := setupRedpanda(t)
 	const topic = "trading.watchlist.test"
 
-	conn, err := segkafka.DialContext(context.Background(), "tcp", brokers[0])
-	require.NoError(t, err)
-	require.NoError(t, conn.CreateTopics(segkafka.TopicConfig{
-		Topic: topic, NumPartitions: 1, ReplicationFactor: 1,
-	}))
-	_ = conn.Close()
+	createTopic(t, brokers, topic)
 
 	repo := &stockRepoCapture{signal: make(chan struct{}, 4)}
-	consumer := NewWatchlistConsumer(brokers, topic, "stock-service-test", repo)
+	consumer, err := NewWatchlistConsumer(brokers, topic, "stock-service-test", repo)
+	require.NoError(t, err)
 	require.NotNil(t, consumer)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -189,9 +199,12 @@ func TestWatchlistConsumerRoundTrip(t *testing.T) {
 		EventType: "WATCHLIST_SYMBOL_ADDED",
 		Data:      WatchlistEventData{Symbol: "NVDA", Name: "NVIDIA Corp"},
 	}
-	w := &segkafka.Writer{Addr: segkafka.TCP(brokers...), Topic: topic, Balancer: &segkafka.LeastBytes{}}
-	defer w.Close()
-	writeWithRetry(t, w, segkafka.Message{Key: []byte("NVDA"), Value: mustMarshal(t, event)})
+	prod, err := commonskafka.NewProducer(brokers)
+	require.NoError(t, err)
+	defer prod.Close()
+	publishWithRetry(t, func() error {
+		return prod.Publish(context.Background(), topic, []byte("NVDA"), mustMarshal(t, event))
+	})
 
 	select {
 	case <-repo.signal:
@@ -213,6 +226,78 @@ func TestWatchlistConsumerRoundTrip(t *testing.T) {
 	require.NoError(t, consumer.Close())
 }
 
+// TestPositionsConsumerRoundTrip exercises the positions consumer end-to-end
+// against a real broker: a snapshot published to the topic is consumed and
+// applied to the (capturing) repository.
+func TestPositionsConsumerRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	brokers := setupRedpanda(t)
+	const topic = "trading.positions.test"
+
+	createTopic(t, brokers, topic)
+
+	repo := &mockPositionsRepo{called: make(chan struct{}, 1)}
+	consumer, err := NewPositionsConsumer(brokers, topic, "stock-service-test", repo)
+	require.NoError(t, err)
+	require.NotNil(t, consumer)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- consumer.Start(ctx) }()
+
+	// The positions consumer starts at the NEWEST offset, so give the group a
+	// moment to join and claim partitions before publishing, otherwise the
+	// message would predate the consumer's starting position.
+	prod, err := commonskafka.NewProducer(brokers)
+	require.NoError(t, err)
+	defer prod.Close()
+
+	event := models.PositionsEvent{
+		EventType: "POSITIONS_SNAPSHOT",
+		Source:    "robinhood",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Data: models.PositionsEventData{
+			BuyingPower: "1000.00",
+			Positions: []models.PositionData{
+				{Symbol: "AAPL", Quantity: "1", AverageBuyPrice: "100", Equity: "110", PercentChange: "10"},
+			},
+		},
+	}
+	payload := mustMarshal(t, event)
+
+	// Publish repeatedly until the consumer (joined at NEWEST) observes one.
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		require.NoError(t, prod.Publish(context.Background(), topic, []byte("AAPL"), payload))
+		select {
+		case <-repo.called:
+			goto consumed
+		case <-time.After(1 * time.Second):
+			if time.Now().After(deadline) {
+				cancel()
+				t.Fatal("timed out waiting for positions consumer to process message")
+			}
+		}
+	}
+consumed:
+
+	assert.GreaterOrEqual(t, repo.Calls(), 1)
+	positions := repo.LastPositions()
+	require.Len(t, positions, 1)
+	assert.Equal(t, "AAPL", positions[0].Symbol)
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("positions consumer did not shut down")
+	}
+	require.NoError(t, consumer.Close())
+}
+
 func TestProducerPublishMethods(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -221,14 +306,10 @@ func TestProducerPublishMethods(t *testing.T) {
 	brokers := setupRedpanda(t)
 	const topic = "stock-events.test"
 
-	conn, err := segkafka.DialContext(context.Background(), "tcp", brokers[0])
-	require.NoError(t, err)
-	require.NoError(t, conn.CreateTopics(segkafka.TopicConfig{
-		Topic: topic, NumPartitions: 1, ReplicationFactor: 1,
-	}))
-	_ = conn.Close()
+	createTopic(t, brokers, topic)
 
-	p := NewProducer(brokers, topic)
+	p, err := NewProducer(brokers, topic)
+	require.NoError(t, err)
 	require.NotNil(t, p)
 	defer p.Close()
 
@@ -247,24 +328,6 @@ func mustMarshal(t *testing.T, v interface{}) []byte {
 	b, err := json.Marshal(v)
 	require.NoError(t, err)
 	return b
-}
-
-// writeWithRetry tolerates leader-election delays right after topic creation.
-func writeWithRetry(t *testing.T, w *segkafka.Writer, msg segkafka.Message) {
-	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := w.WriteMessages(ctx, msg)
-		cancel()
-		if err == nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("failed to write message: %v", err)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
 }
 
 func publishWithRetry(t *testing.T, fn func() error) {

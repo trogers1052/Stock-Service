@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/IBM/sarama"
 	"github.com/trogers1052/stock-alert-system/internal/metrics"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 )
 
 // StockRepository defines the interface for stock database operations
@@ -55,70 +56,65 @@ type WatchlistStock struct {
 
 // WatchlistConsumer handles consuming watchlist events from Kafka
 type WatchlistConsumer struct {
-	reader *kafka.Reader
-	repo   StockRepository
+	group commonsConsumerGroup
+	topic string
+	repo  StockRepository
 }
 
-// NewWatchlistConsumer creates a new Kafka consumer for watchlist events
-func NewWatchlistConsumer(brokers []string, topic, groupID string, repo StockRepository) *WatchlistConsumer {
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     brokers,
-		Topic:       topic,
-		GroupID:     groupID + "-watchlist",
-		MinBytes:    10e3, // 10KB
-		MaxBytes:    10e6, // 10MB
-		MaxWait:     1 * time.Second,
-		StartOffset: kafka.FirstOffset,
-	})
-
-	return &WatchlistConsumer{
-		reader: reader,
-		repo:   repo,
+// NewWatchlistConsumer creates a new Kafka consumer for watchlist events. It
+// uses a dedicated consumer group (groupID + "-watchlist") and, for a brand-new
+// group, starts at the OLDEST offset, matching the prior kafka-go StartOffset:
+// FirstOffset behavior.
+//
+// On a handler (processing) error the message is NOT committed and is
+// redelivered on the next session (Halt policy), preserving the prior
+// "don't commit — message will be redelivered" semantics.
+func NewWatchlistConsumer(brokers []string, topic, groupID string, repo StockRepository) (*WatchlistConsumer, error) {
+	c := &WatchlistConsumer{
+		topic: topic,
+		repo:  repo,
 	}
+
+	group, err := commonskafka.NewConsumerGroup(
+		brokers,
+		groupID+"-watchlist",
+		[]string{topic},
+		c.handle,
+		commonskafka.WithInitialOffset(sarama.OffsetOldest),
+		commonskafka.WithOnError(commonskafka.Halt),
+		commonskafka.WithConsumerClientID("stock-service"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kafka watchlist consumer group: %w", err)
+	}
+	c.group = group
+	return c, nil
 }
 
-// Start begins consuming messages from Kafka
+// Start begins consuming messages from Kafka. It blocks until ctx is cancelled.
 func (c *WatchlistConsumer) Start(ctx context.Context) error {
-	log.Printf("Starting watchlist consumer for topic: %s", c.reader.Config().Topic)
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("Watchlist consumer shutting down...")
-			return c.reader.Close()
-		default:
-			topic := c.reader.Config().Topic
-			msg, err := c.reader.FetchMessage(ctx)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil // Context cancelled, normal shutdown
-				}
-				metrics.KafkaConsumerErrors.WithLabelValues(topic).Inc()
-				log.Printf("Error reading watchlist message: %v", err)
-				continue
-			}
-
-			metrics.KafkaConsumed.WithLabelValues(topic).Inc()
-			metrics.WatchlistEvents.Inc()
-
-			if err := c.processMessage(msg); err != nil {
-				metrics.KafkaConsumerErrors.WithLabelValues(topic).Inc()
-				log.Printf("Error processing watchlist message: %v", err)
-				// Don't commit — message will be redelivered on restart
-				continue
-			}
-
-			if err := c.reader.CommitMessages(ctx, msg); err != nil {
-				log.Printf("Error committing watchlist offset: %v", err)
-			}
-		}
-	}
+	log.Printf("Starting watchlist consumer for topic: %s", c.topic)
+	return c.group.Run(ctx)
 }
 
-// processMessage handles a single Kafka message
-func (c *WatchlistConsumer) processMessage(msg kafka.Message) error {
+// handle is the ConsumerGroup Handler: records metrics and dispatches each
+// message to processMessage. Returning an error triggers the Halt policy.
+func (c *WatchlistConsumer) handle(_ context.Context, msg *commonskafka.Message) error {
+	metrics.KafkaConsumed.WithLabelValues(c.topic).Inc()
+	metrics.WatchlistEvents.Inc()
+
+	if err := c.processMessage(msg.Value); err != nil {
+		metrics.KafkaConsumerErrors.WithLabelValues(c.topic).Inc()
+		log.Printf("Error processing watchlist message: %v", err)
+		return err
+	}
+	return nil
+}
+
+// processMessage handles a single Kafka message payload
+func (c *WatchlistConsumer) processMessage(value []byte) error {
 	var event WatchlistEvent
-	if err := json.Unmarshal(msg.Value, &event); err != nil {
+	if err := json.Unmarshal(value, &event); err != nil {
 		return fmt.Errorf("failed to unmarshal watchlist event: %w", err)
 	}
 
@@ -220,5 +216,5 @@ func (c *WatchlistConsumer) handleSymbolAdded(event WatchlistEvent) error {
 
 // Close closes the Kafka consumer
 func (c *WatchlistConsumer) Close() error {
-	return c.reader.Close()
+	return c.group.Close()
 }
