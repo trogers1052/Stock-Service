@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/trogers1052/stock-alert-system/internal/models"
 	schemas "github.com/trogers1052/trading-event-schemas"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 )
 
 // capturedMessage records the topic/key/value the real producer marshals and
@@ -28,7 +29,7 @@ type capturingPublisher struct {
 	captured []capturedMessage
 }
 
-func (w *capturingPublisher) Publish(_ context.Context, topic string, key, value []byte) error {
+func (w *capturingPublisher) Publish(_ context.Context, topic string, key, value []byte, _ ...commonskafka.Header) error {
 	w.captured = append(w.captured, capturedMessage{Topic: topic, Key: key, Value: value})
 	return nil
 }

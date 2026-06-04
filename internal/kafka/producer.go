@@ -19,7 +19,7 @@ const (
 // publisher is a small interface wrapper around the shared kafka.Producer to
 // enable unit testing of the publish path without a broker.
 type publisher interface {
-	Publish(ctx context.Context, topic string, key, value []byte) error
+	Publish(ctx context.Context, topic string, key, value []byte, headers ...commonskafka.Header) error
 	Close() error
 }
 
@@ -29,14 +29,15 @@ type Producer struct {
 	topic    string
 }
 
-// NewProducer creates a new Kafka producer backed by the shared sarama-based
-// producer. The shared producer is durable by default: it waits for all
-// in-sync replicas to acknowledge each write (RequiredAcks = WaitForAll) and
-// retries transient failures with backoff, so no per-call retry loop is needed
-// here. It returns an error if the underlying producer cannot be created.
+// NewProducer creates a new Kafka producer backed by the shared kafka-go-based
+// producer. The shared producer is durable: it waits for all in-sync replicas
+// to acknowledge each write (RequiredAcks = RequireAll) and retries transient
+// failures with backoff, so no per-call retry loop is needed here. It returns
+// an error if the underlying producer cannot be created.
 func NewProducer(brokers []string, topic string) (*Producer, error) {
 	p, err := commonskafka.NewProducer(
 		brokers,
+		commonskafka.WithRequiredAcks(commonskafka.RequireAll),
 		commonskafka.WithClientID("stock-service"),
 		commonskafka.WithProducerTimeout(writeTimeout),
 	)

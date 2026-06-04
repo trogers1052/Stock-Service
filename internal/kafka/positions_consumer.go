@@ -7,7 +7,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/IBM/sarama"
 	"github.com/shopspring/decimal"
 	"github.com/trogers1052/stock-alert-system/internal/metrics"
 	"github.com/trogers1052/stock-alert-system/internal/models"
@@ -45,7 +44,7 @@ func NewPositionsConsumer(brokers []string, topic, groupID string, repo Position
 		groupID+"-positions", // Separate consumer group for positions
 		[]string{topic},
 		c.handle,
-		commonskafka.WithInitialOffset(sarama.OffsetNewest), // Only read new messages (not historical)
+		commonskafka.WithInitialOffset(commonskafka.OffsetNewest), // Only read new messages (not historical)
 		commonskafka.WithOnError(commonskafka.Halt),
 		commonskafka.WithConsumerClientID("stock-service"),
 	)

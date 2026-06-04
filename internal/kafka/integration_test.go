@@ -3,11 +3,13 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/IBM/sarama"
+	kgo "github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/redpanda"
@@ -61,20 +63,26 @@ func setupRedpanda(t *testing.T) []string {
 	return []string{broker}
 }
 
-// createTopic creates a single-partition topic via the sarama cluster admin so
-// the consumer group has something to read.
+// createTopic creates a single-partition topic via the kafka-go controller
+// connection so the consumer group has something to read.
 func createTopic(t *testing.T, brokers []string, topic string) {
 	t.Helper()
-	cfg := sarama.NewConfig()
-	cfg.Version = sarama.V2_8_0_0
-	admin, err := sarama.NewClusterAdmin(brokers, cfg)
+	conn, err := kgo.Dial("tcp", brokers[0])
 	require.NoError(t, err)
-	defer func() { _ = admin.Close() }()
+	defer func() { _ = conn.Close() }()
 
-	err = admin.CreateTopic(topic, &sarama.TopicDetail{
+	controller, err := conn.Controller()
+	require.NoError(t, err)
+
+	ctrlConn, err := kgo.Dial("tcp", net.JoinHostPort(controller.Host, strconv.Itoa(controller.Port)))
+	require.NoError(t, err)
+	defer func() { _ = ctrlConn.Close() }()
+
+	err = ctrlConn.CreateTopics(kgo.TopicConfig{
+		Topic:             topic,
 		NumPartitions:     1,
 		ReplicationFactor: 1,
-	}, false)
+	})
 	require.NoError(t, err)
 }
 

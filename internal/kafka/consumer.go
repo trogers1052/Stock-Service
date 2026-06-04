@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/IBM/sarama"
 	"github.com/shopspring/decimal"
 	"github.com/trogers1052/stock-alert-system/internal/metrics"
 	"github.com/trogers1052/stock-alert-system/internal/models"
@@ -50,7 +49,7 @@ func NewConsumer(brokers []string, topic, groupID string, repo RawTradeRepositor
 		groupID,
 		[]string{topic},
 		c.handle,
-		commonskafka.WithInitialOffset(sarama.OffsetOldest),
+		commonskafka.WithInitialOffset(commonskafka.OffsetOldest),
 		commonskafka.WithOnError(commonskafka.Halt),
 		commonskafka.WithConsumerClientID("stock-service"),
 	)

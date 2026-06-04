@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/IBM/sarama"
 	"github.com/trogers1052/stock-alert-system/internal/metrics"
 	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 )
@@ -80,7 +79,7 @@ func NewWatchlistConsumer(brokers []string, topic, groupID string, repo StockRep
 		groupID+"-watchlist",
 		[]string{topic},
 		c.handle,
-		commonskafka.WithInitialOffset(sarama.OffsetOldest),
+		commonskafka.WithInitialOffset(commonskafka.OffsetOldest),
 		commonskafka.WithOnError(commonskafka.Halt),
 		commonskafka.WithConsumerClientID("stock-service"),
 	)

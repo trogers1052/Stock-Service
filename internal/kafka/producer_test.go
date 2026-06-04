@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/trogers1052/stock-alert-system/internal/models"
+	commonskafka "github.com/trogers1052/trading-go-commons/kafka"
 )
 
 // mockPublisher is a configurable publisher for unit tests. It records every
@@ -21,7 +22,7 @@ type mockPublisher struct {
 	lastValue []byte
 }
 
-func (m *mockPublisher) Publish(_ context.Context, topic string, key, value []byte) error {
+func (m *mockPublisher) Publish(_ context.Context, topic string, key, value []byte, _ ...commonskafka.Header) error {
 	m.calls++
 	m.lastTopic = topic
 	m.lastKey = key
