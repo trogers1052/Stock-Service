@@ -78,7 +78,7 @@ func (db *DB) GetStock(symbol string) (*models.Stock, error) {
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("stock not found: %s", symbol)
+		return nil, fmt.Errorf("stock not found: %s: %w", symbol, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stock %s: %w", symbol, err)
@@ -109,7 +109,7 @@ func (db *DB) GetStockByID(id string) (*models.Stock, error) {
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("stock not found with id: %s", id)
+		return nil, fmt.Errorf("stock not found with id: %s: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stock by id: %w", err)

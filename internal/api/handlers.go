@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -36,7 +37,7 @@ func NewHandler(db *database.DB, producer *kafka.Producer, redisClient *redis.Cl
 func (h *Handler) GetAllStocks(w http.ResponseWriter, r *http.Request) {
 	stocks, err := h.db.GetAllStocks()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
@@ -50,7 +51,11 @@ func (h *Handler) GetStock(w http.ResponseWriter, r *http.Request) {
 
 	stock, err := h.db.GetStock(symbol)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		if errors.Is(err, database.ErrNotFound) {
+			respondError(w, http.StatusNotFound, "stock not found", nil)
+		} else {
+			respondError(w, http.StatusInternalServerError, "internal error", err)
+		}
 		return
 	}
 
@@ -72,28 +77,31 @@ func (h *Handler) AddStock(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "symbol is required", http.StatusBadRequest)
 		return
 	}
+	if !validSymbol(req.Symbol) {
+		http.Error(w, "invalid symbol", http.StatusBadRequest)
+		return
+	}
 
 	monitoredStock := &models.MonitoredStock{
 		Symbol:  req.Symbol,
 		Enabled: true,
 	}
 	if err := h.db.CreateMonitoredStock(monitoredStock); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
 	// Get the stock to return and publish event
 	stock, err := h.db.GetStock(req.Symbol)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
-	// Publish Kafka event
+	// Publish Kafka event (best-effort; log on failure, don't fail the request)
 	if h.producer != nil {
 		if err := h.producer.PublishStockAdded(r.Context(), stock); err != nil {
-			// Log error but don't fail the request
-			// In production, you'd use a proper logger here
+			log.Printf("kafka publish stock-added failed for %s: %v", req.Symbol, err)
 		}
 	}
 
@@ -106,14 +114,14 @@ func (h *Handler) RemoveStock(w http.ResponseWriter, r *http.Request) {
 	symbol := vars["symbol"]
 
 	if err := h.db.DeleteMonitoredStock(symbol); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
-	// Publish Kafka event
+	// Publish Kafka event (best-effort; log on failure, don't fail the request)
 	if h.producer != nil {
 		if err := h.producer.PublishStockRemoved(r.Context(), symbol); err != nil {
-			// Log error but don't fail the request
+			log.Printf("kafka publish stock-removed failed for %s: %v", symbol, err)
 		}
 	}
 
@@ -124,7 +132,7 @@ func (h *Handler) RemoveStock(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetSectors(w http.ResponseWriter, r *http.Request) {
 	sectorMap, err := h.db.GetSectorMap()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
@@ -234,7 +242,7 @@ func (h *Handler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
 	dbStart := time.Now()
 	if err := h.db.CreateSignalFeedback(fb); err != nil {
 		metrics.DBWriteErrors.Inc()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 	metrics.DBWriteDuration.Observe(time.Since(dbStart).Seconds())
@@ -271,7 +279,7 @@ func (h *Handler) UpdateFeedback(w http.ResponseWriter, r *http.Request) {
 	dbStart := time.Now()
 	if err := h.db.UpdateFeedbackAction(id, req.Action); err != nil {
 		metrics.DBWriteErrors.Inc()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 	metrics.DBWriteDuration.Observe(time.Since(dbStart).Seconds())
@@ -295,7 +303,7 @@ func (h *Handler) GetUnresolvedSignals(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := h.db.GetUnresolvedSignals(limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
@@ -337,7 +345,7 @@ func (h *Handler) UpdateSignalOutcome(w http.ResponseWriter, r *http.Request) {
 	dbStart := time.Now()
 	if err := h.db.UpdateSignalOutcome(id, req.Outcome); err != nil {
 		metrics.DBWriteErrors.Inc()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 	metrics.DBWriteDuration.Observe(time.Since(dbStart).Seconds())
@@ -373,7 +381,7 @@ func (h *Handler) GetRuleAccuracy(w http.ResponseWriter, r *http.Request) {
 
 	accuracy, err := h.db.GetRuleAccuracy(sinceDays, minSignals)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
@@ -409,7 +417,7 @@ func (h *Handler) GetRuleOutcomeQuality(w http.ResponseWriter, r *http.Request) 
 
 	quality, err := h.db.GetRuleOutcomeQuality(sinceDays, minSignals)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
@@ -448,7 +456,7 @@ func (h *Handler) GetFeedback(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := h.db.GetSignalFeedback(limit, sinceDate, symbol)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
@@ -459,7 +467,7 @@ func (h *Handler) GetFeedback(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetFeedbackSummary(w http.ResponseWriter, r *http.Request) {
 	summary, err := h.db.GetFeedbackSummary()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
@@ -480,7 +488,7 @@ func (h *Handler) GetAllTiers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 
@@ -494,7 +502,7 @@ func (h *Handler) GetTier(w http.ResponseWriter, r *http.Request) {
 
 	tier, err := h.db.GetBacktestTier(symbol)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 	if tier == nil {
@@ -521,7 +529,7 @@ func (h *Handler) UpsertTier(w http.ResponseWriter, r *http.Request) {
 	dbStart := time.Now()
 	if err := h.db.UpsertBacktestTier(&tier); err != nil {
 		metrics.DBWriteErrors.Inc()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		respondError(w, http.StatusInternalServerError, "internal error", err)
 		return
 	}
 	metrics.DBWriteDuration.Observe(time.Since(dbStart).Seconds())
@@ -614,4 +622,29 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
+}
+
+// respondError logs the internal error (if any) and returns a generic message to
+// the client, so internal and database error details never leak in the response.
+func respondError(w http.ResponseWriter, status int, publicMsg string, err error) {
+	if err != nil {
+		log.Printf("api error (%d): %s: %v", status, publicMsg, err)
+	}
+	http.Error(w, publicMsg, status)
+}
+
+// validSymbol reports whether s is a plausible ticker: 1-10 chars of letters,
+// digits, '.', or '-'. Rejects obvious junk before it reaches the database.
+func validSymbol(s string) bool {
+	if s == "" || len(s) > 10 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }

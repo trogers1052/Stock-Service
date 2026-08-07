@@ -2,11 +2,16 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	_ "github.com/lib/pq"
 )
+
+// ErrNotFound is returned when a requested row does not exist. Handlers use
+// errors.Is(err, ErrNotFound) to map it to 404 instead of 500.
+var ErrNotFound = errors.New("not found")
 
 // DB wraps the database connection
 type DB struct {
